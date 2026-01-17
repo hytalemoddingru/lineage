@@ -24,11 +24,20 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.14.3
+      - name: Download HytaleServer.jar
+        if: ${{ secrets.HYTALE_SERVER_JAR_URL != '' }}
+        run: |
+          mkdir -p libs
+          curl -fSL "${{ secrets.HYTALE_SERVER_JAR_URL }}" -o libs/HytaleServer.jar
       - name: Build release jars
-        run: gradle :proxy:shadowJar :backend-mod:shadowJar :agent:shadowJar
+        run: gradle :proxy:shadowJar :agent:shadowJar
+      - name: Build backend-mod (requires HytaleServer.jar)
+        if: ${{ secrets.HYTALE_SERVER_JAR_URL != '' }}
+        run: gradle :backend-mod:shadowJar
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: false
           files: |
             proxy/build/libs/lineage-proxy-*.jar
             backend-mod/build/libs/lineage-backend-mod-*.jar
