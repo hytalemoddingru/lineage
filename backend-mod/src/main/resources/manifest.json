@@ -1,0 +1,12 @@
+{
+  "Group": "ru.hytalemodding",
+  "Name": "LineageBackendMod",
+  "Version": "0.1.0",
+  "Main": "ru.hytalemodding.lineage.backend.LineageBackendMod",
+  "ServerVersion": "*",
+  "Authors": [
+    {
+      "Name": "Lineage Team"
+    }
+  ]
+}

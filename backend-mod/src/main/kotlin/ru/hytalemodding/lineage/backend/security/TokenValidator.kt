@@ -1,0 +1,93 @@
+/*
+ * Lineage Proxy
+ * Copyright (c) 2026 Hytale Modding Russia
+ *
+ * Licensed under the GNU Affero General Public License v3.0
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+package ru.hytalemodding.lineage.backend.security
+
+import ru.hytalemodding.lineage.shared.time.Clock
+import ru.hytalemodding.lineage.shared.time.SystemClock
+import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
+import ru.hytalemodding.lineage.shared.token.ProxyToken
+import ru.hytalemodding.lineage.shared.token.ParsedProxyToken
+import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
+import ru.hytalemodding.lineage.shared.token.ProxyTokenFormatException
+import ru.hytalemodding.lineage.shared.token.TokenValidationError
+import ru.hytalemodding.lineage.shared.token.TokenValidationException
+import org.slf4j.LoggerFactory
+
+/**
+ * Validates proxy tokens received by the backend server, supporting secret rotation.
+ */
+class TokenValidator(
+    private val secrets: List<ByteArray>,
+    private val clock: Clock = SystemClock,
+) {
+    private val logger = LoggerFactory.getLogger(TokenValidator::class.java)
+
+    constructor(secret: ByteArray, clock: Clock = SystemClock) : this(listOf(secret), clock)
+
+    init {
+        require(secrets.isNotEmpty()) { "At least one proxy secret must be provided" }
+        secrets.forEachIndexed { index, secret ->
+            require(secret.isNotEmpty()) { "Proxy secret at index $index must not be empty" }
+        }
+    }
+
+    /**
+     * Validates [encodedToken] and returns parsed token claims on success.
+     *
+     * @throws TokenValidationException when token is invalid or expired.
+     */
+    fun validate(encodedToken: String, expectedServerId: String): ProxyToken {
+        val parsed = try {
+            ProxyTokenCodec.decode(encodedToken)
+        } catch (ex: ProxyTokenFormatException) {
+            val parts = encodedToken.split('.')
+            val payloadLen = parts.getOrNull(1)?.length ?: -1
+            val preview = encodedToken.take(64)
+            logger.warn(
+                "Malformed proxy token (parts={}, payloadLen={}, len={}, preview={})",
+                parts.size,
+                payloadLen,
+                encodedToken.length,
+                preview,
+            )
+            throw TokenValidationException(TokenValidationError.MALFORMED, ex.message ?: "Malformed token")
+        }
+
+        if (!hasValidSignature(parsed)) {
+            throw TokenValidationException(TokenValidationError.INVALID_SIGNATURE, "Invalid token signature")
+        }
+
+        val token = parsed.token
+        if (token.version != CURRENT_PROXY_TOKEN_VERSION) {
+            throw TokenValidationException(
+                TokenValidationError.UNSUPPORTED_VERSION,
+                "Unsupported token version: ${token.version}",
+            )
+        }
+
+        val now = clock.nowMillis()
+        if (token.issuedAtMillis > now) {
+            throw TokenValidationException(TokenValidationError.NOT_YET_VALID, "Token issued in the future")
+        }
+        if (token.expiresAtMillis < now) {
+            throw TokenValidationException(TokenValidationError.EXPIRED, "Token has expired")
+        }
+        if (token.targetServerId != expectedServerId) {
+            throw TokenValidationException(
+                TokenValidationError.TARGET_MISMATCH,
+                "Token target mismatch: ${token.targetServerId}",
+            )
+        }
+
+        return token
+    }
+
+    private fun hasValidSignature(parsed: ParsedProxyToken): Boolean {
+        return secrets.any { secret -> ProxyTokenCodec.verifySignature(parsed, secret) }
+    }
+}

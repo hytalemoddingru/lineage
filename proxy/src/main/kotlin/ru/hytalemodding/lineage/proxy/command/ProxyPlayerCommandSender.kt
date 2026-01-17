@@ -1,0 +1,43 @@
+/*
+ * Lineage Proxy
+ * Copyright (c) 2026 Hytale Modding Russia
+ *
+ * Licensed under the GNU Affero General Public License v3.0
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+package ru.hytalemodding.lineage.proxy.command
+
+import ru.hytalemodding.lineage.api.command.CommandSender
+import ru.hytalemodding.lineage.api.command.SenderType
+import ru.hytalemodding.lineage.api.player.ProxyPlayer
+import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
+import java.util.UUID
+
+/**
+ * Command sender implementation backed by a proxy player.
+ */
+class ProxyPlayerCommandSender(
+    private val player: ProxyPlayer,
+    private val responder: CommandResponder,
+) : CommandSender {
+    override val name: String
+        get() = player.username
+
+    override val type: SenderType = SenderType.PLAYER
+
+    override fun sendMessage(message: String) {
+        responder.send(player.id, message)
+    }
+}
+
+/**
+ * Sends command responses back to the backend via messaging.
+ */
+class CommandResponder(
+    private val channel: ru.hytalemodding.lineage.api.messaging.Channel,
+) {
+    fun send(playerId: UUID, message: String) {
+        val payload = PlayerCommandProtocol.encodeResponse(playerId, message)
+        channel.send(payload)
+    }
+}
