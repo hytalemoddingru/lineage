@@ -48,5 +48,32 @@ public final class HelloMod extends LineageMod {
 
 ## Dependency
 
-When the API is published to Maven Central, depend on the `api` artifact.
-Until then, build from source and depend on the `:api` module.
+Lineage API is published on Maven Central.
+
+Gradle Kotlin DSL:
+
+```kotlin
+dependencies {
+    implementation("ru.hytalemodding.lineage:api:0.1.0")
+}
+```
+
+Gradle Groovy DSL:
+
+```groovy
+dependencies {
+    implementation "ru.hytalemodding.lineage:api:0.1.0"
+}
+```
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>ru.hytalemodding.lineage</groupId>
+  <artifactId>api</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+You can still build from source and depend on the local `:api` module when needed.

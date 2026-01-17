@@ -25,13 +25,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.14.3
-      - name: Import GPG key
-        run: |
-          echo "${{ secrets.OSSRH_GPG_PRIVATE_KEY }}" | gpg --batch --import
       - name: Publish to Maven Central
         env:
-          ORG_GRADLE_PROJECT_ossrhUsername: ${{ secrets.OSSRH_USERNAME }}
-          ORG_GRADLE_PROJECT_ossrhPassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.OSSRH_GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.OSSRH_GPG_PASSPHRASE }}
-        run: gradle publishToSonatype closeAndReleaseSonatypeStagingRepository
+        run: gradle --no-configuration-cache publishToMavenCentral

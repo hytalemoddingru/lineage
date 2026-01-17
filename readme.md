@@ -39,8 +39,10 @@ Prerequisite for backend-mod:
 Run the proxy:
 
 ```
-java -jar proxy/build/libs/lineage-proxy-<version>.jar [config.toml]
+java -jar proxy/build/libs/lineage-proxy-<version>.jar
 ```
+
+Optional: pass a custom config path instead of the default `config.toml` in the working directory.
 
 Install backend pieces:
 
@@ -55,8 +57,44 @@ Configure:
 
 ## Documentation
 
-- Modding guide (Markdown): `docs/modding/index.md`
-- API reference (Dokka): `build/dokka/html/index.html`
+- https://lineage.hytalemodding.ru (modding guide + API reference)
+
+## Dependency
+
+Gradle Kotlin DSL:
+
+```kotlin
+dependencies {
+    implementation("ru.hytalemodding.lineage:api:0.1.0")
+    implementation("ru.hytalemodding.lineage:shared:0.1.0")
+}
+```
+
+Gradle Groovy DSL:
+
+```groovy
+dependencies {
+    implementation "ru.hytalemodding.lineage:api:0.1.0"
+    implementation "ru.hytalemodding.lineage:shared:0.1.0"
+}
+```
+
+Maven:
+
+```xml
+<dependencies>
+  <dependency>
+    <groupId>ru.hytalemodding.lineage</groupId>
+    <artifactId>api</artifactId>
+    <version>0.1.0</version>
+  </dependency>
+  <dependency>
+    <groupId>ru.hytalemodding.lineage</groupId>
+    <artifactId>shared</artifactId>
+    <version>0.1.0</version>
+  </dependency>
+</dependencies>
+```
 
 ## Support
 
