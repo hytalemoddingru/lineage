@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HYTALE_SERVER_JAR_URL: ${{ secrets.HYTALE_SERVER_JAR_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,14 +27,14 @@ jobs:
         with:
           gradle-version: 8.14.3
       - name: Download HytaleServer.jar
-        if: ${{ secrets.HYTALE_SERVER_JAR_URL != '' }}
+        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
         run: |
           mkdir -p libs
-          curl -fSL "${{ secrets.HYTALE_SERVER_JAR_URL }}" -o libs/HytaleServer.jar
+          curl -fSL "$HYTALE_SERVER_JAR_URL" -o libs/HytaleServer.jar
       - name: Build release jars
         run: gradle :proxy:shadowJar :agent:shadowJar
       - name: Build backend-mod (requires HytaleServer.jar)
-        if: ${{ secrets.HYTALE_SERVER_JAR_URL != '' }}
+        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
         run: gradle :backend-mod:shadowJar
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
