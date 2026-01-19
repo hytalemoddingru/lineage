@@ -7,21 +7,21 @@
  */
 package ru.hytalemodding.lineage.proxy.routing
 
+import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.api.routing.RoutingStrategy
 import ru.hytalemodding.lineage.proxy.config.ProxyConfig
 
 /**
- * Static router that selects backends directly from configuration.
+ * Default routing strategy based on configuration.
  */
-class StaticRouter(
+class StaticRoutingStrategy(
     private val config: ProxyConfig,
-) : Router {
-    private val backendsById = config.backends.associateBy { it.id }
+) : RoutingStrategy {
+    override fun selectInitialBackend(context: RoutingContext): String {
+        return config.routing.defaultBackendId
+    }
 
-    override fun selectInitialBackend() =
-        backendsById[config.routing.defaultBackendId]
-            ?: throw IllegalStateException(
-                "Default backend not found: ${config.routing.defaultBackendId}",
-            )
-
-    override fun findBackend(id: String) = backendsById[id]
+    override fun selectBackend(context: RoutingContext): String {
+        return context.requestedBackendId ?: config.routing.defaultBackendId
+    }
 }

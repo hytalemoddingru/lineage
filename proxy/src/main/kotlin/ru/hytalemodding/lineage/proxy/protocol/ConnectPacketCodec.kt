@@ -8,11 +8,14 @@
 package ru.hytalemodding.lineage.proxy.protocol
 
 import io.netty.buffer.ByteBuf
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimits
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
+import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
-private const val VARIABLE_BLOCK_START = 102
-private const val PROTOCOL_HASH_LENGTH = 64
+private const val VARIABLE_BLOCK_START = ProtocolLimits.CONNECT_VARIABLE_BLOCK_START
+private const val PROTOCOL_HASH_LENGTH = ProtocolLimits.PROTOCOL_HASH_LENGTH
 
 /**
  * Parsed Connect packet payload from the Hytale protocol.
@@ -42,8 +45,16 @@ object ConnectPacketCodec {
      *
      * The referral source address is not decoded and will be null.
      */
-    fun decode(payload: ByteBuf): ConnectPacket {
+    fun decode(payload: ByteBuf, limits: ProtocolLimitsConfig = ProtocolLimitsConfig()): ConnectPacket {
         val base = payload.readerIndex()
+        val limit = payload.writerIndex()
+        val totalSize = limit - base
+        require(totalSize >= VARIABLE_BLOCK_START) {
+            "Connect payload too small: $totalSize"
+        }
+        require(totalSize <= limits.maxConnectSize) {
+            "Connect payload too large: $totalSize"
+        }
         val nullBits = payload.getByte(base)
         val protocolHash = readFixedAsciiString(payload, base + 1, PROTOCOL_HASH_LENGTH)
         val clientType = payload.getByte(base + 65)
@@ -56,10 +67,54 @@ object ConnectPacketCodec {
         val referralSourceOffset = payload.getIntLE(base + 98)
         val varBlockStart = base + VARIABLE_BLOCK_START
 
-        val language = if (nullBits.toInt() and 1 != 0) readVarString(payload, varBlockStart + languageOffset) else null
-        val identityToken = if (nullBits.toInt() and 2 != 0) readVarString(payload, varBlockStart + identityOffset) else null
-        val username = readVarString(payload, varBlockStart + usernameOffset)
-        val referralData = if (nullBits.toInt() and 4 != 0) readVarBytes(payload, varBlockStart + referralDataOffset) else null
+        val language = if (nullBits.toInt() and 1 != 0) {
+            requireOffset(languageOffset, "Language")
+            readVarString(
+                payload,
+                varBlockStart + languageOffset,
+                limits.maxLanguageLength,
+                StandardCharsets.US_ASCII,
+                "Language",
+                limit,
+            )
+        } else null
+        val identityToken = if (nullBits.toInt() and 2 != 0) {
+            requireOffset(identityOffset, "IdentityToken")
+            readVarString(
+                payload,
+                varBlockStart + identityOffset,
+                limits.maxIdentityTokenLength,
+                StandardCharsets.UTF_8,
+                "IdentityToken",
+                limit,
+            )
+        } else null
+        requireOffset(usernameOffset, "Username")
+        val username = readVarString(
+            payload,
+            varBlockStart + usernameOffset,
+            limits.maxUsernameLength,
+            StandardCharsets.US_ASCII,
+            "Username",
+            limit,
+        )
+        val referralData = if (nullBits.toInt() and 4 != 0) {
+            requireOffset(referralDataOffset, "ReferralData")
+            readVarBytes(
+                payload,
+                varBlockStart + referralDataOffset,
+                limits.maxReferralDataLength,
+                "ReferralData",
+                limit,
+            )
+        } else null
+        if (nullBits.toInt() and 8 != 0) {
+            requireOffset(referralSourceOffset, "ReferralSource")
+            val referralPos = varBlockStart + referralSourceOffset
+            require(HostAddress.validateStructure(payload, referralPos, limit, limits.maxHostLength)) {
+                "Invalid ReferralSource structure"
+            }
+        }
         val referralSource = null
 
         return ConnectPacket(
@@ -98,19 +153,25 @@ object ConnectPacketCodec {
         val varBlockStart = out.writerIndex()
 
         if (packet.language != null) {
+            requireByteLength(packet.language, StandardCharsets.US_ASCII, ProtocolLimits.MAX_LANGUAGE_LENGTH, "Language")
             out.setIntLE(slots[0], out.writerIndex() - varBlockStart)
-            writeVarString(out, packet.language)
+            writeVarString(out, packet.language, StandardCharsets.US_ASCII)
         } else out.setIntLE(slots[0], -1)
 
         if (packet.identityToken != null) {
+            requireByteLength(packet.identityToken, StandardCharsets.UTF_8, ProtocolLimits.MAX_IDENTITY_TOKEN_LENGTH, "IdentityToken")
             out.setIntLE(slots[1], out.writerIndex() - varBlockStart)
-            writeVarString(out, packet.identityToken)
+            writeVarString(out, packet.identityToken, StandardCharsets.UTF_8)
         } else out.setIntLE(slots[1], -1)
 
+        requireByteLength(packet.username, StandardCharsets.US_ASCII, ProtocolLimits.MAX_USERNAME_LENGTH, "Username")
         out.setIntLE(slots[2], out.writerIndex() - varBlockStart)
-        writeVarString(out, packet.username)
+        writeVarString(out, packet.username, StandardCharsets.US_ASCII)
 
         if (packet.referralData != null) {
+            require(packet.referralData.size <= ProtocolLimits.MAX_REFERRAL_DATA_LENGTH) {
+                "ReferralData exceeds max length ${ProtocolLimits.MAX_REFERRAL_DATA_LENGTH}"
+            }
             out.setIntLE(slots[3], out.writerIndex() - varBlockStart)
             VarInt.write(out, packet.referralData.size)
             out.writeBytes(packet.referralData)
@@ -139,25 +200,59 @@ object ConnectPacketCodec {
         buf.writeBytes(bytes.copyOf(length))
     }
 
-    private fun readVarString(buf: ByteBuf, offset: Int): String {
+    private fun readVarString(
+        buf: ByteBuf,
+        offset: Int,
+        maxLength: Int,
+        charset: Charset,
+        field: String,
+        limit: Int,
+    ): String {
+        require(offset in 0 until limit) { "$field offset out of bounds" }
         val len = VarInt.peek(buf, offset)
+        require(len >= 0) { "$field length invalid" }
+        require(len <= maxLength) { "$field exceeds max length $maxLength" }
         val varIntLen = VarInt.length(buf, offset)
+        require(varIntLen > 0) { "$field varint length invalid" }
+        val end = offset + varIntLen + len
+        require(end <= limit) { "$field exceeds payload bounds" }
         val bytes = ByteArray(len)
         buf.getBytes(offset + varIntLen, bytes)
-        return String(bytes, StandardCharsets.UTF_8)
+        return String(bytes, charset)
     }
 
-    private fun writeVarString(buf: ByteBuf, value: String) {
-        val bytes = value.toByteArray(StandardCharsets.UTF_8)
+    private fun writeVarString(buf: ByteBuf, value: String, charset: Charset) {
+        val bytes = value.toByteArray(charset)
         VarInt.write(buf, bytes.size)
         buf.writeBytes(bytes)
     }
 
-    private fun readVarBytes(buf: ByteBuf, offset: Int): ByteArray {
+    private fun readVarBytes(
+        buf: ByteBuf,
+        offset: Int,
+        maxLength: Int,
+        field: String,
+        limit: Int,
+    ): ByteArray {
+        require(offset in 0 until limit) { "$field offset out of bounds" }
         val len = VarInt.peek(buf, offset)
+        require(len >= 0) { "$field length invalid" }
+        require(len <= maxLength) { "$field exceeds max length $maxLength" }
         val varIntLen = VarInt.length(buf, offset)
+        require(varIntLen > 0) { "$field varint length invalid" }
+        val end = offset + varIntLen + len
+        require(end <= limit) { "$field exceeds payload bounds" }
         val bytes = ByteArray(len)
         buf.getBytes(offset + varIntLen, bytes)
         return bytes
+    }
+
+    private fun requireOffset(offset: Int, field: String) {
+        require(offset >= 0) { "$field offset invalid" }
+    }
+
+    private fun requireByteLength(value: String, charset: Charset, maxLength: Int, field: String) {
+        val length = value.toByteArray(charset).size
+        require(length <= maxLength) { "$field exceeds max length $maxLength" }
     }
 }

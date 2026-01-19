@@ -11,6 +11,7 @@ import org.tomlj.Toml
 import org.tomlj.TomlArray
 import org.tomlj.TomlParseResult
 import org.tomlj.TomlTable
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import java.io.Reader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -50,6 +51,28 @@ object TomlLoader {
                 [routing]
                 default_backend_id = "server-1"
 
+                [referral]
+                host = "127.0.0.1"
+                port = 25565
+
+                [limits]
+                max_language_length = 128
+                max_identity_token_length = 8192
+                max_username_length = 16
+                max_referral_data_length = 4096
+                max_host_length = 256
+                max_connect_size = 38161
+
+                [rate_limits]
+                connection_per_ip_max = 20
+                connection_per_ip_window_millis = 10000
+                handshake_per_ip_max = 20
+                handshake_per_ip_window_millis = 10000
+                streams_per_session_max = 8
+                streams_per_session_window_millis = 10000
+                invalid_packets_per_session_max = 4
+                invalid_packets_per_session_window_millis = 10000
+
                 [messaging]
                 enabled = false
                 host = "0.0.0.0"
@@ -86,6 +109,9 @@ object TomlLoader {
         val security = parseSecurity(result.getTable("security"))
         val backends = parseBackends(result.getArray("backends"))
         val routing = parseRouting(result.getTable("routing"))
+        val limits = parseLimits(result.getTable("limits"))
+        val referral = parseReferral(result.getTable("referral"), listener, limits)
+        val rateLimits = parseRateLimits(result.getTable("rate_limits"))
         val messaging = parseMessaging(result.getTable("messaging"))
 
         val backendIds = backends.map { it.id }.toSet()
@@ -100,6 +126,9 @@ object TomlLoader {
             backends = backends,
             routing = routing,
             messaging = messaging,
+            referral = referral,
+            limits = limits,
+            rateLimits = rateLimits,
         )
     }
 
@@ -174,6 +203,65 @@ object TomlLoader {
         return MessagingConfig(host = host, port = port, enabled = enabled)
     }
 
+    private fun parseReferral(table: TomlTable?, listener: ListenerConfig, limits: ProtocolLimitsConfig): ReferralConfig {
+        if (table == null) {
+            return ReferralConfig(listener.host, listener.port)
+        }
+        val host = requireString(table, "host", "referral.host")
+        val port = requirePort(table, "port", "referral.port")
+        if (host.toByteArray(StandardCharsets.UTF_8).size > limits.maxHostLength) {
+            throw ConfigException("referral.host exceeds max length ${limits.maxHostLength}")
+        }
+        return ReferralConfig(host = host, port = port)
+    }
+
+    private fun parseLimits(table: TomlTable?): ProtocolLimitsConfig {
+        if (table == null) {
+            return ProtocolLimitsConfig()
+        }
+        val maxLanguage = requirePositiveInt(table, "max_language_length", "limits.max_language_length")
+        val maxIdentity = requirePositiveInt(table, "max_identity_token_length", "limits.max_identity_token_length")
+        val maxUsername = requirePositiveInt(table, "max_username_length", "limits.max_username_length")
+        val maxReferral = requirePositiveInt(table, "max_referral_data_length", "limits.max_referral_data_length")
+        val maxHost = requirePositiveInt(table, "max_host_length", "limits.max_host_length")
+        val maxConnect = requirePositiveInt(table, "max_connect_size", "limits.max_connect_size")
+        return ProtocolLimitsConfig(
+            maxLanguageLength = maxLanguage,
+            maxIdentityTokenLength = maxIdentity,
+            maxUsernameLength = maxUsername,
+            maxReferralDataLength = maxReferral,
+            maxHostLength = maxHost,
+            maxConnectSize = maxConnect,
+        )
+    }
+
+    private fun parseRateLimits(table: TomlTable?): RateLimitConfig {
+        if (table == null) {
+            return RateLimitConfig(
+                connectionPerIp = RateLimitWindow(20, 10_000),
+                handshakePerIp = RateLimitWindow(20, 10_000),
+                streamsPerSession = RateLimitWindow(8, 10_000),
+                invalidPacketsPerSession = RateLimitWindow(4, 10_000),
+            )
+        }
+        val connection = parseRateLimitWindow(table, "connection_per_ip", "rate_limits.connection_per_ip")
+        val handshake = parseRateLimitWindow(table, "handshake_per_ip", "rate_limits.handshake_per_ip")
+        val streams = parseRateLimitWindow(table, "streams_per_session", "rate_limits.streams_per_session")
+        val invalidPackets = parseRateLimitWindow(table, "invalid_packets_per_session", "rate_limits.invalid_packets_per_session")
+        return RateLimitConfig(
+            connectionPerIp = connection,
+            handshakePerIp = handshake,
+            streamsPerSession = streams,
+            invalidPacketsPerSession = invalidPackets,
+        )
+    }
+
+    private fun parseRateLimitWindow(table: TomlTable, prefix: String, path: String): RateLimitWindow {
+        val maxEvents = requirePositiveInt(table, "${prefix}_max", "$path.max")
+        val windowMillis = requirePositiveLong(table, "${prefix}_window_millis", "$path.window_millis")
+        return RateLimitWindow(maxEvents, windowMillis)
+    }
+
     private fun requireString(table: TomlTable, key: String, path: String): String {
         val value = table.getString(key)
             ?: throw ConfigException("Missing $path")
@@ -190,6 +278,15 @@ object TomlLoader {
             throw ConfigException("$path must be > 0")
         }
         return value
+    }
+
+    private fun requirePositiveInt(table: TomlTable, key: String, path: String): Int {
+        val value = table.getLong(key)
+            ?: throw ConfigException("Missing $path")
+        if (value <= 0 || value > Int.MAX_VALUE) {
+            throw ConfigException("$path must be a positive integer")
+        }
+        return value.toInt()
     }
 
     private fun requirePort(table: TomlTable, key: String, path: String): Int {

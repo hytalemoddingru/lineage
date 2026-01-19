@@ -7,6 +7,8 @@
  */
 package ru.hytalemodding.lineage.proxy.config
 
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
+
 /**
  * Current config schema version.
  */
@@ -21,6 +23,9 @@ const val CURRENT_CONFIG_SCHEMA_VERSION = 1
  * @property backends List of available backend servers.
  * @property routing Routing defaults and rules.
  * @property messaging UDP messaging configuration for backend communication.
+ * @property referral Referral source configuration injected into Connect packets.
+ * @property limits Protocol limit overrides for client sanity checks.
+ * @property rateLimits Basic abuse protection thresholds.
  */
 data class ProxyConfig(
     val schemaVersion: Int,
@@ -29,6 +34,9 @@ data class ProxyConfig(
     val backends: List<BackendConfig>,
     val routing: RoutingConfig,
     val messaging: MessagingConfig,
+    val referral: ReferralConfig,
+    val limits: ProtocolLimitsConfig,
+    val rateLimits: RateLimitConfig,
 )
 
 /**
@@ -86,4 +94,30 @@ data class MessagingConfig(
     val host: String,
     val port: Int,
     val enabled: Boolean,
+)
+
+/**
+ * Referral source configuration used in Connect packet injection.
+ */
+data class ReferralConfig(
+    val host: String,
+    val port: Int,
+)
+
+/**
+ * Rate limiting configuration for basic abuse protection.
+ */
+data class RateLimitConfig(
+    val connectionPerIp: RateLimitWindow,
+    val handshakePerIp: RateLimitWindow,
+    val streamsPerSession: RateLimitWindow,
+    val invalidPacketsPerSession: RateLimitWindow,
+)
+
+/**
+ * Fixed window rate limit definition.
+ */
+data class RateLimitWindow(
+    val maxEvents: Int,
+    val windowMillis: Long,
 )

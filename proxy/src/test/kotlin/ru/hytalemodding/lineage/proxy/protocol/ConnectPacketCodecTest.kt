@@ -10,8 +10,10 @@ package ru.hytalemodding.lineage.proxy.protocol
 import io.netty.buffer.Unpooled
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -72,5 +74,27 @@ class ConnectPacketCodecTest {
         assertEquals(packet.username, decoded.username)
         assertNull(decoded.referralData)
         assertNull(decoded.referralSource)
+    }
+
+    @Test
+    fun decodeRejectsUsernameOverLimit() {
+        val packet = ConnectPacket(
+            protocolHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            clientType = 1,
+            language = "en",
+            identityToken = null,
+            uuid = UUID.fromString("323e4567-e89b-12d3-a456-426614174000"),
+            username = "PlayerOne",
+            referralData = null,
+            referralSource = null,
+        )
+        val buffer = Unpooled.buffer()
+        ConnectPacketCodec.encode(packet, buffer)
+        buffer.readerIndex(0)
+
+        val limits = ProtocolLimitsConfig(maxUsernameLength = 4)
+        assertThrows(IllegalArgumentException::class.java) {
+            ConnectPacketCodec.decode(buffer, limits)
+        }
     }
 }

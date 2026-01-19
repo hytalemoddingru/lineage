@@ -18,14 +18,19 @@ import ru.hytalemodding.lineage.api.player.PlayerState
 import ru.hytalemodding.lineage.proxy.event.player.PlayerConnectEvent
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
 import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
+import ru.hytalemodding.lineage.api.routing.RoutingContext
 import ru.hytalemodding.lineage.proxy.protocol.CONNECT_PACKET_ID
 import ru.hytalemodding.lineage.proxy.protocol.ConnectPacketCodec
 import ru.hytalemodding.lineage.proxy.protocol.HostAddress
 import ru.hytalemodding.lineage.proxy.routing.Router
+import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
 import ru.hytalemodding.lineage.proxy.session.PlayerSession
 import ru.hytalemodding.lineage.proxy.util.Logging
+import ru.hytalemodding.lineage.proxy.config.ReferralConfig
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
+import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 
 /**
@@ -35,10 +40,15 @@ class ConnectPacketInterceptor(
     private val session: PlayerSession,
     private val tokenService: TokenService,
     private val transferTokenValidator: TransferTokenValidator,
+    private val rateLimitService: RateLimitService,
     private val router: Router,
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
     private val transferService: PlayerTransferService,
+    private val referralConfig: ReferralConfig,
+    private val protocolLimits: ProtocolLimitsConfig,
+    private val remoteKey: String,
+    private val clientAddress: InetSocketAddress?,
     private val onBackendSelected: (String) -> Unit,
 ) : ChannelInboundHandlerAdapter() {
     private val logger = Logging.logger(ConnectPacketInterceptor::class.java)
@@ -90,6 +100,11 @@ class ConnectPacketInterceptor(
 
             val base = buf.readerIndex()
             val payloadLength = buf.getIntLE(base)
+            if (payloadLength <= 0 || payloadLength > protocolLimits.maxConnectSize) {
+                logger.warn("Invalid Connect payload length {} from {}", payloadLength, remoteKey)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
             val packetId = buf.getIntLE(base + 4)
 
             if (packetId != CONNECT_PACKET_ID) {
@@ -104,9 +119,20 @@ class ConnectPacketInterceptor(
                 return
             }
 
+            if (!rateLimitService.handshakePerIp.tryAcquire(remoteKey)) {
+                logger.warn("Handshake rate limit exceeded for {}", remoteKey)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
             logger.info("Full Connect packet intercepted. Length: {}", payloadLength)
             val payload = buf.slice(base + 8, payloadLength)
-            val connect = ConnectPacketCodec.decode(payload)
+            val connect = try {
+                ConnectPacketCodec.decode(payload, protocolLimits)
+            } catch (ex: IllegalArgumentException) {
+                logger.warn("Connect payload rejected: {}", ex.message)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
             session.playerId = connect.uuid.toString()
             val backendId = resolveBackend(connect)
             val isNewPlayer = playerManager.get(connect.uuid) == null
@@ -122,10 +148,15 @@ class ConnectPacketInterceptor(
                 transferService.transfer(player, backendId)
             }
             val token = tokenService.issueToken(connect.uuid.toString(), backendId, session.clientCertB64)
-            
+            val tokenBytes = token.toByteArray(StandardCharsets.UTF_8)
+            if (tokenBytes.size > protocolLimits.maxReferralDataLength) {
+                logger.warn("Issued token exceeds referralData limit ({} > {})", tokenBytes.size, protocolLimits.maxReferralDataLength)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
             val updated = connect.copy(
-                referralData = token.toByteArray(StandardCharsets.UTF_8),
-                referralSource = HostAddress("127.0.0.1", 25565)
+                referralData = tokenBytes,
+                referralSource = HostAddress(referralConfig.host, referralConfig.port)
             )
 
             val modified = ctx.alloc().buffer()
@@ -156,7 +187,7 @@ class ConnectPacketInterceptor(
 
         } catch (e: Exception) {
             logger.warn("Interception failed", e)
-            passThrough(ctx, msg)
+            recordInvalidAndClose(ctx, msg)
         }
     }
 
@@ -206,11 +237,22 @@ class ConnectPacketInterceptor(
         }
     }
 
+    private fun recordInvalidAndClose(ctx: ChannelHandlerContext, msg: Any) {
+        try {
+            rateLimitService.invalidPacketsPerSession.tryAcquire(session.id.toString())
+        } finally {
+            if (ReferenceCountUtil.refCnt(msg) > 0) {
+                ReferenceCountUtil.release(msg)
+            }
+            ctx.close()
+        }
+    }
+
     /**
      * Resolves the backend ID using transfer token referral data when present.
      */
     private fun resolveBackend(connect: ru.hytalemodding.lineage.proxy.protocol.ConnectPacket): String {
-        var backendId = session.selectedBackendId ?: router.selectInitialBackend().id
+        var requestedBackendId: String? = session.selectedBackendId
         val referralData = connect.referralData
         if (referralData != null && referralData.isNotEmpty()) {
             val encoded = String(referralData, StandardCharsets.UTF_8)
@@ -219,14 +261,22 @@ class ConnectPacketInterceptor(
             if (transfer != null) {
                 val backend = router.findBackend(transfer.targetServerId)
                 if (backend != null) {
-                    backendId = backend.id
-                    logger.info("Transfer token selects backend {}", backendId)
+                    requestedBackendId = backend.id
+                    logger.info("Transfer token selects backend {}", requestedBackendId)
                 } else {
                     logger.warn("Transfer token requested unknown backend {}", transfer.targetServerId)
                 }
             }
         }
-        session.selectedBackendId = backendId
-        return backendId
+        val context = RoutingContext(
+            playerId = connect.uuid,
+            username = connect.username,
+            clientAddress = clientAddress,
+            protocolHash = connect.protocolHash,
+            requestedBackendId = requestedBackendId,
+        )
+        val backend = router.selectBackend(context)
+        session.selectedBackendId = backend.id
+        return backend.id
     }
 }

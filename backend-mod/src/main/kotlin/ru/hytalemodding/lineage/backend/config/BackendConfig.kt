@@ -25,6 +25,8 @@ const val CURRENT_BACKEND_CONFIG_SCHEMA_VERSION = 1
  * @property messagingPort Proxy port for UDP messaging control channel.
  * @property messagingEnabled Whether messaging client should be enabled.
  * @property enforceProxy Whether invalid or missing proxy tokens should reject login.
+ * @property replayWindowMillis Time window for replay protection.
+ * @property replayMaxEntries Maximum replay entries kept in memory.
  */
 data class BackendConfig(
     val schemaVersion: Int,
@@ -37,4 +39,6 @@ data class BackendConfig(
     val messagingPort: Int,
     val messagingEnabled: Boolean,
     val enforceProxy: Boolean,
+    val replayWindowMillis: Long,
+    val replayMaxEntries: Int,
 )

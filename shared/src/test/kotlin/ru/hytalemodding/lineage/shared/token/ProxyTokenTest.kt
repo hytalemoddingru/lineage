@@ -22,6 +22,7 @@ class ProxyTokenTest {
             targetServerId = "hub-1",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce-value",
         )
         val secret = "proxy-secret".toByteArray()
 
@@ -31,6 +32,25 @@ class ProxyTokenTest {
         assertEquals(token, parsed.token)
         assertTrue(ProxyTokenCodec.verifySignature(parsed, secret))
         assertFalse(ProxyTokenCodec.verifySignature(parsed, "wrong-secret".toByteArray()))
+    }
+
+    @Test
+    fun encodeDecodeRoundTripLegacyVersion() {
+        val token = ProxyToken(
+            version = LEGACY_PROXY_TOKEN_VERSION,
+            playerId = "player-legacy",
+            targetServerId = "hub-legacy",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            clientCertB64 = "legacy-cert",
+        )
+        val secret = "proxy-secret".toByteArray()
+
+        val encoded = ProxyTokenCodec.encode(token, secret)
+        val parsed = ProxyTokenCodec.decode(encoded)
+
+        assertEquals(token, parsed.token)
+        assertTrue(ProxyTokenCodec.verifySignature(parsed, secret))
     }
 
     @Test

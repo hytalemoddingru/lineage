@@ -17,6 +17,7 @@ enum class TokenValidationError {
     NOT_YET_VALID,
     UNSUPPORTED_VERSION,
     TARGET_MISMATCH,
+    REPLAYED,
 }
 
 /**

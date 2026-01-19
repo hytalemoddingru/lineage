@@ -11,6 +11,8 @@ import ru.hytalemodding.lineage.shared.crypto.Hmac
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
+import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
+import ru.hytalemodding.lineage.shared.token.LEGACY_PROXY_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -26,17 +28,18 @@ class TokenValidatorTest {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
 
         val parsed = validator.validate(encoded, "hub")
 
-        assertEquals("player-1", parsed.playerId)
+        assertEquals("player-1", parsed.token.playerId)
     }
 
     @Test
@@ -44,11 +47,12 @@ class TokenValidatorTest {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, "other-secret".toByteArray())
 
@@ -63,11 +67,12 @@ class TokenValidatorTest {
         val clock = FixedClock(3_000L)
         val validator = TokenValidator(secret, clock)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
 
@@ -82,11 +87,12 @@ class TokenValidatorTest {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
 
@@ -100,7 +106,7 @@ class TokenValidatorTest {
     fun rejectsUnsupportedVersion() {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
-        val payload = "2|player-1|hub|1000|2000".toByteArray()
+        val payload = "3|player-1|hub|1000|2000".toByteArray()
         val signature = Hmac.sign(secret, payload)
         val encoder = Base64.getUrlEncoder().withoutPadding()
         val encoded = "v1.${encoder.encodeToString(payload)}.${encoder.encodeToString(signature)}"
@@ -128,7 +134,7 @@ class TokenValidatorTest {
         val previous = "old-secret".toByteArray()
         val validator = TokenValidator(listOf(secret, previous), clock)
         val token = ProxyToken(
-            version = 1,
+            version = LEGACY_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
@@ -138,7 +144,7 @@ class TokenValidatorTest {
 
         val parsed = validator.validate(encoded, "hub")
 
-        assertEquals("player-1", parsed.playerId)
+        assertEquals("player-1", parsed.token.playerId)
     }
 
     private class FixedClock(private val now: Long) : Clock {

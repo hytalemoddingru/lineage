@@ -9,10 +9,12 @@ package ru.hytalemodding.lineage.backend
 
 import ru.hytalemodding.lineage.backend.config.BackendConfigLoader
 import ru.hytalemodding.lineage.backend.handshake.HandshakeInterceptor
+import ru.hytalemodding.lineage.backend.security.ReplayProtector
 import ru.hytalemodding.lineage.backend.security.TokenValidator
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
+import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.io.StringReader
@@ -29,13 +31,15 @@ class BackendSmokeTest {
         val config = BackendConfigLoader.load(StringReader(toml))
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(config.proxySecret.toByteArray(StandardCharsets.UTF_8), clock)
-        val interceptor = HandshakeInterceptor(validator, config.serverId)
+        val replay = ReplayProtector(config.replayWindowMillis, config.replayMaxEntries, clock)
+        val interceptor = HandshakeInterceptor(validator, config.serverId, replay)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, config.proxySecret.toByteArray(StandardCharsets.UTF_8))
 

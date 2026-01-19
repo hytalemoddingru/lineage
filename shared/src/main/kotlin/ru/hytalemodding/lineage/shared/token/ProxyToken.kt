@@ -16,7 +16,8 @@ private const val PAYLOAD_DELIMITER = '|'
 /**
  * Current token schema version.
  */
-const val CURRENT_PROXY_TOKEN_VERSION = 1
+const val CURRENT_PROXY_TOKEN_VERSION = 2
+const val LEGACY_PROXY_TOKEN_VERSION = 1
 
 /**
  * Immutable token claims used by proxy and backend validation.
@@ -26,6 +27,7 @@ const val CURRENT_PROXY_TOKEN_VERSION = 1
  * @property targetServerId Backend server identifier selected by the proxy.
  * @property issuedAtMillis Time of issuance in milliseconds since Unix Epoch.
  * @property expiresAtMillis Expiration time in milliseconds since Unix Epoch.
+ * @property nonceB64 Base64url-encoded nonce used for replay protection (v2+).
  */
 data class ProxyToken(
     val version: Int,
@@ -34,6 +36,7 @@ data class ProxyToken(
     val issuedAtMillis: Long,
     val expiresAtMillis: Long,
     val clientCertB64: String? = null,
+    val nonceB64: String? = null,
 ) {
     init {
         require(version > 0) { "Token version must be positive" }
@@ -43,6 +46,10 @@ data class ProxyToken(
         require(!targetServerId.contains(PAYLOAD_DELIMITER)) { "targetServerId must not contain '|'" }
         require(issuedAtMillis >= 0) { "issuedAtMillis must be >= 0" }
         require(expiresAtMillis >= issuedAtMillis) { "expiresAtMillis must be >= issuedAtMillis" }
+        if (version == CURRENT_PROXY_TOKEN_VERSION) {
+            require(!nonceB64.isNullOrBlank()) { "nonceB64 must be provided for token v$version" }
+            require(!nonceB64.contains(PAYLOAD_DELIMITER)) { "nonceB64 must not contain '|'" }
+        }
     }
 }
 
@@ -68,7 +75,8 @@ class ProxyTokenFormatException(message: String) : IllegalArgumentException(mess
  * Encoding/decoding for proxy tokens using HMAC-SHA256 signatures.
  *
  * Format: `v1.<payload_b64url>.<signature_b64url>`
- * Payload: `version|playerId|targetServerId|issuedAtMillis|expiresAtMillis`
+ * Payload (v1): `version|playerId|targetServerId|issuedAtMillis|expiresAtMillis|clientCertB64`
+ * Payload (v2): `version|playerId|targetServerId|issuedAtMillis|expiresAtMillis|nonceB64|clientCertB64`
  */
 object ProxyTokenCodec {
     private const val PREFIX = "v1"
@@ -79,7 +87,7 @@ object ProxyTokenCodec {
      * Encodes [token] into a compact string and signs it with [secret].
      */
     fun encode(token: ProxyToken, secret: ByteArray): String {
-        require(token.version == CURRENT_PROXY_TOKEN_VERSION) {
+        require(token.version == CURRENT_PROXY_TOKEN_VERSION || token.version == LEGACY_PROXY_TOKEN_VERSION) {
             "Unsupported token version for encoding: ${token.version}"
         }
         val payloadBytes = buildPayload(token)
@@ -114,18 +122,36 @@ object ProxyTokenCodec {
     }
 
     private fun buildPayload(token: ProxyToken): ByteArray {
-        val payload = buildString {
-            append(token.version)
-            append(PAYLOAD_DELIMITER)
-            append(token.playerId)
-            append(PAYLOAD_DELIMITER)
-            append(token.targetServerId)
-            append(PAYLOAD_DELIMITER)
-            append(token.issuedAtMillis)
-            append(PAYLOAD_DELIMITER)
-            append(token.expiresAtMillis)
-            append(PAYLOAD_DELIMITER)
-            append(token.clientCertB64 ?: "")
+        val payload = when (token.version) {
+            LEGACY_PROXY_TOKEN_VERSION -> buildString {
+                append(token.version)
+                append(PAYLOAD_DELIMITER)
+                append(token.playerId)
+                append(PAYLOAD_DELIMITER)
+                append(token.targetServerId)
+                append(PAYLOAD_DELIMITER)
+                append(token.issuedAtMillis)
+                append(PAYLOAD_DELIMITER)
+                append(token.expiresAtMillis)
+                append(PAYLOAD_DELIMITER)
+                append(token.clientCertB64 ?: "")
+            }
+            CURRENT_PROXY_TOKEN_VERSION -> buildString {
+                append(token.version)
+                append(PAYLOAD_DELIMITER)
+                append(token.playerId)
+                append(PAYLOAD_DELIMITER)
+                append(token.targetServerId)
+                append(PAYLOAD_DELIMITER)
+                append(token.issuedAtMillis)
+                append(PAYLOAD_DELIMITER)
+                append(token.expiresAtMillis)
+                append(PAYLOAD_DELIMITER)
+                append(token.nonceB64 ?: "")
+                append(PAYLOAD_DELIMITER)
+                append(token.clientCertB64 ?: "")
+            }
+            else -> throw ProxyTokenFormatException("Unsupported token version for encoding: ${token.version}")
         }
         return payload.toByteArray(StandardCharsets.UTF_8)
     }
@@ -142,15 +168,29 @@ object ProxyTokenCodec {
             ?: throw ProxyTokenFormatException("Invalid issuedAtMillis")
         val expiresAt = parts[4].toLongOrNull()
             ?: throw ProxyTokenFormatException("Invalid expiresAtMillis")
-        val clientCert = if (parts.size > 5 && parts[5].isNotBlank()) parts[5] else null
-        return ProxyToken(
-            version = version,
-            playerId = parts[1],
-            targetServerId = parts[2],
-            issuedAtMillis = issuedAt,
-            expiresAtMillis = expiresAt,
-            clientCertB64 = clientCert,
-        )
+        val clientCert = when (version) {
+            LEGACY_PROXY_TOKEN_VERSION -> if (parts.size > 5 && parts[5].isNotBlank()) parts[5] else null
+            CURRENT_PROXY_TOKEN_VERSION -> if (parts.size > 6 && parts[6].isNotBlank()) parts[6] else null
+            else -> null
+        }
+        val nonce = if (version >= CURRENT_PROXY_TOKEN_VERSION) {
+            if (parts.size > 5 && parts[5].isNotBlank()) parts[5] else null
+        } else {
+            null
+        }
+        return try {
+            ProxyToken(
+                version = version,
+                playerId = parts[1],
+                targetServerId = parts[2],
+                issuedAtMillis = issuedAt,
+                expiresAtMillis = expiresAt,
+                clientCertB64 = clientCert,
+                nonceB64 = nonce,
+            )
+        } catch (ex: IllegalArgumentException) {
+            throw ProxyTokenFormatException(ex.message ?: "Invalid token claims")
+        }
     }
 
     private fun decodePart(part: String, label: String): ByteArray {

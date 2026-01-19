@@ -39,6 +39,18 @@ public final class LineageAgentHelper {
             if (payloadParts.length < 5) {
                 return null;
             }
+            int version;
+            try {
+                version = Integer.parseInt(payloadParts[0]);
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+            if (version >= 2) {
+                if (payloadParts.length > 6 && !payloadParts[6].isEmpty()) {
+                    return payloadParts[6];
+                }
+                return null;
+            }
             if (payloadParts.length > 5 && !payloadParts[5].isEmpty()) {
                 return payloadParts[5];
             }

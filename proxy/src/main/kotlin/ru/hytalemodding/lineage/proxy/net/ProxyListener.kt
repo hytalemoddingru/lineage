@@ -24,6 +24,7 @@ import ru.hytalemodding.lineage.api.event.EventBus
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
+import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.session.SessionManager
 import ru.hytalemodding.lineage.proxy.util.CertificateUtil
 import ru.hytalemodding.lineage.proxy.util.Logging
@@ -38,6 +39,7 @@ class ProxyListener(
     private val sessionManager: SessionManager,
     private val tokenService: TokenService,
     private val transferTokenValidator: TransferTokenValidator,
+    private val rateLimitService: RateLimitService,
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
 ) : AutoCloseable {
@@ -70,9 +72,12 @@ class ProxyListener(
                         sessionManager,
                         tokenService,
                         transferTokenValidator,
+                        rateLimitService,
                         certs,
                         playerManager,
                         eventBus,
+                        config.referral,
+                        config.limits,
                     )
                     ch.attr(QuicSessionHandler.SESSION_HANDLER_KEY).set(sessionHandler)
                     ch.pipeline().addLast(sessionHandler)

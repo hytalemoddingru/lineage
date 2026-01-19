@@ -75,6 +75,8 @@ object BackendConfigLoader {
             messagingPort = DEFAULT_MESSAGING_PORT,
             messagingEnabled = true,
             enforceProxy = true,
+            replayWindowMillis = DEFAULT_REPLAY_WINDOW_MILLIS,
+            replayMaxEntries = DEFAULT_REPLAY_MAX_ENTRIES,
         )
         write(path, config)
         return BackendConfigBootstrap(config, secret)
@@ -91,6 +93,8 @@ object BackendConfigLoader {
         val messagingPort = resolveMessagingPort(result)
         val messagingEnabled = result.getBoolean("messaging_enabled") ?: true
         val enforceProxy = result.getBoolean("enforce_proxy") ?: true
+        val replayWindowMillis = resolveReplayWindow(result)
+        val replayMaxEntries = resolveReplayMaxEntries(result)
         return BackendConfig(
             schemaVersion = schemaVersion,
             serverId = serverId,
@@ -102,6 +106,8 @@ object BackendConfigLoader {
             messagingPort = messagingPort,
             messagingEnabled = messagingEnabled,
             enforceProxy = enforceProxy,
+            replayWindowMillis = replayWindowMillis,
+            replayMaxEntries = replayMaxEntries,
         )
     }
 
@@ -151,6 +157,8 @@ object BackendConfigLoader {
             writer.appendLine("messaging_port = ${config.messagingPort}")
             writer.appendLine("messaging_enabled = ${config.messagingEnabled}")
             writer.appendLine("enforce_proxy = ${config.enforceProxy}")
+            writer.appendLine("replay_window_millis = ${config.replayWindowMillis}")
+            writer.appendLine("replay_max_entries = ${config.replayMaxEntries}")
         }
     }
 
@@ -196,8 +204,26 @@ object BackendConfigLoader {
         return port.toInt()
     }
 
+    private fun resolveReplayWindow(result: TomlParseResult): Long {
+        val window = result.getLong("replay_window_millis") ?: DEFAULT_REPLAY_WINDOW_MILLIS
+        if (window <= 0) {
+            throw ConfigException("replay_window_millis must be > 0")
+        }
+        return window
+    }
+
+    private fun resolveReplayMaxEntries(result: TomlParseResult): Int {
+        val value = result.getLong("replay_max_entries") ?: DEFAULT_REPLAY_MAX_ENTRIES.toLong()
+        if (value <= 0 || value > Int.MAX_VALUE) {
+            throw ConfigException("replay_max_entries must be a positive integer")
+        }
+        return value.toInt()
+    }
+
     private const val DEFAULT_PROXY_CONNECT_HOST = "127.0.0.1"
     private const val DEFAULT_PROXY_CONNECT_PORT = 25565
     private const val DEFAULT_MESSAGING_HOST = "127.0.0.1"
     private const val DEFAULT_MESSAGING_PORT = 25570
+    private const val DEFAULT_REPLAY_WINDOW_MILLIS = 10_000L
+    private const val DEFAULT_REPLAY_MAX_ENTRIES = 100_000
 }

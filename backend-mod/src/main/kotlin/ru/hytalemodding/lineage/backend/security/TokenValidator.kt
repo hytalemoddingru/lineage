@@ -10,6 +10,7 @@ package ru.hytalemodding.lineage.backend.security
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.time.SystemClock
 import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
+import ru.hytalemodding.lineage.shared.token.LEGACY_PROXY_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ParsedProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
@@ -17,6 +18,7 @@ import ru.hytalemodding.lineage.shared.token.ProxyTokenFormatException
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
 import org.slf4j.LoggerFactory
+import java.util.Base64
 
 /**
  * Validates proxy tokens received by the backend server, supporting secret rotation.
@@ -41,7 +43,7 @@ class TokenValidator(
      *
      * @throws TokenValidationException when token is invalid or expired.
      */
-    fun validate(encodedToken: String, expectedServerId: String): ProxyToken {
+    fun validate(encodedToken: String, expectedServerId: String): ValidatedProxyToken {
         val parsed = try {
             ProxyTokenCodec.decode(encodedToken)
         } catch (ex: ProxyTokenFormatException) {
@@ -63,7 +65,7 @@ class TokenValidator(
         }
 
         val token = parsed.token
-        if (token.version != CURRENT_PROXY_TOKEN_VERSION) {
+        if (token.version != CURRENT_PROXY_TOKEN_VERSION && token.version != LEGACY_PROXY_TOKEN_VERSION) {
             throw TokenValidationException(
                 TokenValidationError.UNSUPPORTED_VERSION,
                 "Unsupported token version: ${token.version}",
@@ -84,10 +86,21 @@ class TokenValidator(
             )
         }
 
-        return token
+        val replayKey = buildReplayKey(parsed, token, expectedServerId)
+        return ValidatedProxyToken(token, replayKey)
     }
 
     private fun hasValidSignature(parsed: ParsedProxyToken): Boolean {
         return secrets.any { secret -> ProxyTokenCodec.verifySignature(parsed, secret) }
     }
+
+    private fun buildReplayKey(parsed: ParsedProxyToken, token: ProxyToken, backendId: String): ReplayKey {
+        val nonce = token.nonceB64 ?: Base64.getUrlEncoder().withoutPadding().encodeToString(parsed.signature)
+        return ReplayKey(backendId, token.playerId, nonce)
+    }
 }
+
+data class ValidatedProxyToken(
+    val token: ProxyToken,
+    val replayKey: ReplayKey,
+)

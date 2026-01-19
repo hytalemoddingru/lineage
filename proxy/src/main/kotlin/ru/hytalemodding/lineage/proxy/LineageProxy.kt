@@ -18,9 +18,12 @@ import ru.hytalemodding.lineage.proxy.command.PlayerCommandGateway
 import ru.hytalemodding.lineage.proxy.command.PermissionCommand
 import ru.hytalemodding.lineage.proxy.permission.PermissionCheckerImpl
 import ru.hytalemodding.lineage.proxy.permission.PermissionStore
-import ru.hytalemodding.lineage.proxy.routing.StaticRouter
+import ru.hytalemodding.lineage.api.routing.RoutingStrategy
+import ru.hytalemodding.lineage.proxy.routing.StaticRoutingStrategy
+import ru.hytalemodding.lineage.proxy.routing.StrategyRouter
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
+import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.session.SessionManager
 import ru.hytalemodding.lineage.proxy.util.Logging
 import ru.hytalemodding.lineage.proxy.messaging.MessagingImpl
@@ -44,7 +47,6 @@ fun main(args: Array<String>) {
     val logger = Logging.logger(ProxyListener::class.java)
     val configPath = Path.of(args.firstOrNull() ?: "config.toml")
     val config = TomlLoader.load(configPath)
-    val router = StaticRouter(config)
     val sessionManager = SessionManager()
     val secret = config.security.proxySecret.toByteArray(StandardCharsets.UTF_8)
     val tokenService = TokenService(
@@ -52,6 +54,7 @@ fun main(args: Array<String>) {
         config.security.tokenTtlMillis,
     )
     val transferTokenValidator = TransferTokenValidator(secret)
+    val rateLimitService = RateLimitService(config.rateLimits)
     var messagingServer: MessagingServer? = null
     val eventBus = EventBusImpl()
     val commandRegistry = CommandRegistryImpl()
@@ -63,6 +66,9 @@ fun main(args: Array<String>) {
     val dispatcher = CommandDispatcher(commandRegistry, permissionChecker)
     val consoleInput = ConsoleInputService(dispatcher, ConsoleCommandSender())
     val serviceRegistry = ServiceRegistryImpl()
+    val routingStrategy = StaticRoutingStrategy(config)
+    serviceRegistry.register(RoutingStrategy.SERVICE_KEY, routingStrategy)
+    val router = StrategyRouter(config, serviceRegistry, routingStrategy)
     val scheduler = SchedulerImpl()
     val players = PlayerManagerImpl()
     val backends = BackendRegistryImpl(config)
@@ -74,6 +80,7 @@ fun main(args: Array<String>) {
         sessionManager,
         tokenService,
         transferTokenValidator,
+        rateLimitService,
         players,
         eventBus,
     )

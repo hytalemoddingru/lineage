@@ -32,6 +32,8 @@ class BackendConfigLoaderTest {
         assertEquals(25570, config.messagingPort)
         assertEquals(true, config.messagingEnabled)
         assertEquals(true, config.enforceProxy)
+        assertEquals(10_000L, config.replayWindowMillis)
+        assertEquals(100_000, config.replayMaxEntries)
     }
 
     @Test
@@ -53,6 +55,8 @@ class BackendConfigLoaderTest {
         assertEquals(25570, config.messagingPort)
         assertEquals(true, config.messagingEnabled)
         assertEquals(true, config.enforceProxy)
+        assertEquals(10_000L, config.replayWindowMillis)
+        assertEquals(100_000, config.replayMaxEntries)
     }
 
     @Test
@@ -75,6 +79,8 @@ class BackendConfigLoaderTest {
         assertEquals("10.0.0.5", config.messagingHost)
         assertEquals(25571, config.messagingPort)
         assertEquals(false, config.enforceProxy)
+        assertEquals(10_000L, config.replayWindowMillis)
+        assertEquals(100_000, config.replayMaxEntries)
     }
 
     @Test

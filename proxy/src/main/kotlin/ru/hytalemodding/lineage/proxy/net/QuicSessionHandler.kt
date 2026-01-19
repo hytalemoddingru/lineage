@@ -22,8 +22,12 @@ import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
 import ru.hytalemodding.lineage.proxy.routing.Router
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
+import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.session.SessionManager
 import ru.hytalemodding.lineage.proxy.util.CertificateUtil
+import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.proxy.config.ReferralConfig
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import java.net.InetSocketAddress
 import java.security.MessageDigest
 import java.util.Base64
@@ -39,9 +43,12 @@ class QuicSessionHandler(
     private val sessionManager: SessionManager,
     private val tokenService: TokenService,
     private val transferTokenValidator: TransferTokenValidator,
+    private val rateLimitService: RateLimitService,
     private val certs: CertificateUtil.CertPair,
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
+    private val referralConfig: ReferralConfig,
+    private val protocolLimits: ProtocolLimitsConfig,
 ) : ChannelInboundHandlerAdapter() {
     companion object {
         val SESSION_HANDLER_KEY: AttributeKey<QuicSessionHandler> =
@@ -53,11 +60,21 @@ class QuicSessionHandler(
     private val logger = ru.hytalemodding.lineage.proxy.util.Logging.logger(QuicSessionHandler::class.java)
     private var backendConnectFuture: CompletableFuture<QuicChannel>? = null
     private var clientChannel: QuicChannel? = null
+    private var remoteKey: String = "unknown"
+    private var clientAddress: InetSocketAddress? = null
     private val transferService = PlayerTransferService(eventBus)
 
     override fun channelActive(ctx: ChannelHandlerContext) {
         val clientChannel = ctx.channel() as QuicChannel
         this.clientChannel = clientChannel
+        val remote = clientChannel.remoteAddress() as? InetSocketAddress
+        clientAddress = remote
+        remoteKey = remote?.address?.hostAddress ?: remote?.hostString ?: "unknown"
+        if (!rateLimitService.connectionPerIp.tryAcquire(remoteKey)) {
+            logger.warn("Connection rate limit exceeded for {}", remoteKey)
+            clientChannel.close()
+            return
+        }
         logger.info("New connection from {}", clientChannel.remoteAddress())
         session.attachClient(clientChannel)
 
@@ -66,7 +83,14 @@ class QuicSessionHandler(
             session.clientCertB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(hash)
         } catch (e: Exception) {}
 
-        val backend = router.selectInitialBackend()
+        val context = RoutingContext(
+            playerId = null,
+            username = null,
+            clientAddress = clientAddress,
+            protocolHash = null,
+            requestedBackendId = null,
+        )
+        val backend = router.selectInitialBackend(context)
         session.selectedBackendId = backend.id
     }
 
@@ -74,6 +98,11 @@ class QuicSessionHandler(
      * Handles a newly opened QUIC stream from the client.
      */
     fun handleIncomingStream(ch: QuicStreamChannel) {
+        if (!rateLimitService.streamsPerSession.tryAcquire(session.id.toString())) {
+            logger.warn("Stream rate limit exceeded for session {}", session.id)
+            ch.close()
+            return
+        }
         val backendChannel = session.backendChannel as? QuicChannel
         if (backendChannel == null && ch.streamId() != 0L) {
             ch.config().isAutoRead = false
@@ -92,10 +121,15 @@ class QuicSessionHandler(
                 session,
                 tokenService,
                 transferTokenValidator,
+                rateLimitService,
                 router,
                 playerManager,
                 eventBus,
                 transferService,
+                referralConfig,
+                protocolLimits,
+                remoteKey,
+                clientAddress,
             ) { backendId ->
                 val currentInterceptor = interceptorRef
                 if (currentInterceptor == null) {

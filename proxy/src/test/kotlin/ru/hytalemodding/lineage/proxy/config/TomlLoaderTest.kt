@@ -48,6 +48,10 @@ class TomlLoaderTest {
         assertEquals(30000, config.security.tokenTtlMillis)
         assertEquals("hub", config.routing.defaultBackendId)
         assertEquals(2, config.backends.size)
+        assertEquals("0.0.0.0", config.referral.host)
+        assertEquals(25565, config.referral.port)
+        assertEquals(20, config.rateLimits.connectionPerIp.maxEvents)
+        assertEquals(10_000L, config.rateLimits.connectionPerIp.windowMillis)
     }
 
     @Test

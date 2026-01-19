@@ -47,13 +47,25 @@ Optional: pass a custom config path instead of the default `config.toml` in the 
 Install backend pieces:
 
 - Copy `backend-mod/build/libs/lineage-backend-mod-<version>.jar` into the server mods folder.
-- Start the server with `-javaagent:/path/to/lineage-agent-<version>.jar`.
+- Optional: start the server with `-javaagent:/path/to/lineage-agent-<version>.jar` when certificate binding requires it. Prefer patched/early-plugin modes when available.
 
 Configure:
 
 - Proxy config: `config.toml` (auto-created on first run).
 - Backend config: `<server data dir>/config.toml` (auto-created on first run).
 - `security.proxy_secret` must match backend `proxy_secret`.
+
+Config highlights:
+
+- `referral.host` / `referral.port` define the referral source injected into Connect.
+- `limits.*` controls protocol sanity limits (language, identity token, username, referral data, host, connect size).
+- `rate_limits.*` provides basic per-IP and per-session abuse protection.
+- Backend config adds `replay_window_millis` and `replay_max_entries` for replay protection.
+- Proxy tokens use a nonce-enabled format (v2) with v1 compatibility.
+
+Transfer:
+
+- Use `/lineage transfer <backendId>` on the backend server to issue a referral to the proxy.
 
 ## Documentation
 
@@ -65,8 +77,8 @@ Gradle Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("ru.hytalemodding.lineage:api:0.1.0")
-    implementation("ru.hytalemodding.lineage:shared:0.1.0")
+    implementation("ru.hytalemodding.lineage:api:0.2.0")
+    implementation("ru.hytalemodding.lineage:shared:0.2.0")
 }
 ```
 
@@ -74,8 +86,8 @@ Gradle Groovy DSL:
 
 ```groovy
 dependencies {
-    implementation "ru.hytalemodding.lineage:api:0.1.0"
-    implementation "ru.hytalemodding.lineage:shared:0.1.0"
+    implementation "ru.hytalemodding.lineage:api:0.2.0"
+    implementation "ru.hytalemodding.lineage:shared:0.2.0"
 }
 ```
 
@@ -86,12 +98,12 @@ Maven:
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>api</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
   </dependency>
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>shared</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
   </dependency>
 </dependencies>
 ```

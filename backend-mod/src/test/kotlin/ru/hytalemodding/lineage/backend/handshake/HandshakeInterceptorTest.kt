@@ -7,10 +7,12 @@
  */
 package ru.hytalemodding.lineage.backend.handshake
 
+import ru.hytalemodding.lineage.backend.security.ReplayProtector
 import ru.hytalemodding.lineage.backend.security.TokenValidator
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
+import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -22,14 +24,17 @@ class HandshakeInterceptorTest {
 
     @Test
     fun validatesReferralToken() {
-        val validator = TokenValidator(secret, FixedClock(1_500L))
-        val interceptor = HandshakeInterceptor(validator, "hub")
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val replay = ReplayProtector(10_000L, 1000, clock)
+        val interceptor = HandshakeInterceptor(validator, "hub", replay)
         val token = ProxyToken(
-            version = 1,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
 
@@ -40,8 +45,10 @@ class HandshakeInterceptorTest {
 
     @Test
     fun rejectsMissingReferralData() {
-        val validator = TokenValidator(secret, FixedClock(1_500L))
-        val interceptor = HandshakeInterceptor(validator, "hub")
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val replay = ReplayProtector(10_000L, 1000, clock)
+        val interceptor = HandshakeInterceptor(validator, "hub", replay)
 
         val ex = assertThrows(TokenValidationException::class.java) {
             interceptor.validateReferralData(null)
@@ -51,8 +58,10 @@ class HandshakeInterceptorTest {
 
     @Test
     fun rejectsBlankReferralData() {
-        val validator = TokenValidator(secret, FixedClock(1_500L))
-        val interceptor = HandshakeInterceptor(validator, "hub")
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val replay = ReplayProtector(10_000L, 1000, clock)
+        val interceptor = HandshakeInterceptor(validator, "hub", replay)
 
         val ex = assertThrows(TokenValidationException::class.java) {
             interceptor.validateReferralData("   ".toByteArray())
@@ -62,5 +71,28 @@ class HandshakeInterceptorTest {
 
     private class FixedClock(private val now: Long) : Clock {
         override fun nowMillis(): Long = now
+    }
+
+    @Test
+    fun rejectsReplayedToken() {
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val replay = ReplayProtector(10_000L, 1000, clock)
+        val interceptor = HandshakeInterceptor(validator, "hub", replay)
+        val token = ProxyToken(
+            version = CURRENT_PROXY_TOKEN_VERSION,
+            playerId = "player-1",
+            targetServerId = "hub",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            nonceB64 = "nonce",
+        )
+        val encoded = ProxyTokenCodec.encode(token, secret).toByteArray()
+
+        interceptor.validateReferralData(encoded)
+        val ex = assertThrows(TokenValidationException::class.java) {
+            interceptor.validateReferralData(encoded)
+        }
+        assertEquals(TokenValidationError.REPLAYED, ex.error)
     }
 }

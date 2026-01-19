@@ -8,8 +8,12 @@
 package ru.hytalemodding.lineage.proxy
 
 import ru.hytalemodding.lineage.proxy.config.TomlLoader
-import ru.hytalemodding.lineage.proxy.routing.StaticRouter
+import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.api.routing.RoutingStrategy
+import ru.hytalemodding.lineage.proxy.routing.StaticRoutingStrategy
+import ru.hytalemodding.lineage.proxy.routing.StrategyRouter
 import ru.hytalemodding.lineage.proxy.security.TokenService
+import ru.hytalemodding.lineage.proxy.service.ServiceRegistryImpl
 import ru.hytalemodding.lineage.shared.time.Clock
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -41,8 +45,13 @@ class ProxySmokeTest {
         """.trimIndent()
 
         val config = TomlLoader.load(StringReader(toml))
-        val router = StaticRouter(config)
-        val backend = router.selectInitialBackend()
+        val services = ServiceRegistryImpl()
+        val strategy = StaticRoutingStrategy(config)
+        services.register(RoutingStrategy.SERVICE_KEY, strategy)
+        val router = StrategyRouter(config, services, strategy)
+        val backend = router.selectInitialBackend(
+            RoutingContext(null, null, null, null, null)
+        )
         val tokenService = TokenService(
             secret = config.security.proxySecret.toByteArray(StandardCharsets.UTF_8),
             tokenTtlMillis = config.security.tokenTtlMillis,

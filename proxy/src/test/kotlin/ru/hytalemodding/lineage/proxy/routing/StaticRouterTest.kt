@@ -7,13 +7,20 @@
  */
 package ru.hytalemodding.lineage.proxy.routing
 
+import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.api.routing.RoutingStrategy
 import ru.hytalemodding.lineage.proxy.config.BackendConfig
 import ru.hytalemodding.lineage.proxy.config.CURRENT_CONFIG_SCHEMA_VERSION
 import ru.hytalemodding.lineage.proxy.config.ListenerConfig
 import ru.hytalemodding.lineage.proxy.config.MessagingConfig
 import ru.hytalemodding.lineage.proxy.config.ProxyConfig
+import ru.hytalemodding.lineage.proxy.config.RateLimitConfig
+import ru.hytalemodding.lineage.proxy.config.RateLimitWindow
+import ru.hytalemodding.lineage.proxy.config.ReferralConfig
 import ru.hytalemodding.lineage.proxy.config.RoutingConfig
 import ru.hytalemodding.lineage.proxy.config.SecurityConfig
+import ru.hytalemodding.lineage.proxy.service.ServiceRegistryImpl
+import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -22,15 +29,15 @@ import org.junit.jupiter.api.Test
 class StaticRouterTest {
     @Test
     fun returnsDefaultBackend() {
-        val router = StaticRouter(sampleConfig())
-        val backend = router.selectInitialBackend()
+        val router = newRouter(sampleConfig())
+        val backend = router.selectInitialBackend(RoutingContext(null, null, null, null, null))
 
         assertEquals("hub", backend.id)
     }
 
     @Test
     fun findsBackendById() {
-        val router = StaticRouter(sampleConfig())
+        val router = newRouter(sampleConfig())
 
         assertEquals("minigame", router.findBackend("minigame")?.id)
         assertNull(router.findBackend("missing"))
@@ -39,11 +46,18 @@ class StaticRouterTest {
     @Test
     fun throwsWhenDefaultMissing() {
         val config = sampleConfig().copy(routing = RoutingConfig(defaultBackendId = "missing"))
-        val router = StaticRouter(config)
+        val router = newRouter(config)
 
         assertThrows(IllegalStateException::class.java) {
-            router.selectInitialBackend()
+            router.selectInitialBackend(RoutingContext(null, null, null, null, null))
         }
+    }
+
+    private fun newRouter(config: ProxyConfig): StrategyRouter {
+        val services = ServiceRegistryImpl()
+        val strategy = StaticRoutingStrategy(config)
+        services.register(RoutingStrategy.SERVICE_KEY, strategy)
+        return StrategyRouter(config, services, strategy)
     }
 
     private fun sampleConfig(): ProxyConfig {
@@ -57,6 +71,14 @@ class StaticRouterTest {
             ),
             routing = RoutingConfig(defaultBackendId = "hub"),
             messaging = MessagingConfig(host = "0.0.0.0", port = 25570, enabled = false),
+            referral = ReferralConfig(host = "127.0.0.1", port = 25565),
+            limits = ProtocolLimitsConfig(),
+            rateLimits = RateLimitConfig(
+                connectionPerIp = RateLimitWindow(20, 10_000),
+                handshakePerIp = RateLimitWindow(20, 10_000),
+                streamsPerSession = RateLimitWindow(8, 10_000),
+                invalidPacketsPerSession = RateLimitWindow(4, 10_000),
+            ),
         )
     }
 }

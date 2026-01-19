@@ -17,6 +17,7 @@ import ru.hytalemodding.lineage.backend.command.LineageProxyCommand
 import ru.hytalemodding.lineage.backend.config.BackendConfigLoader
 import ru.hytalemodding.lineage.backend.handshake.HandshakeInterceptor
 import ru.hytalemodding.lineage.backend.messaging.BackendMessaging
+import ru.hytalemodding.lineage.backend.security.ReplayProtector
 import ru.hytalemodding.lineage.backend.security.TokenValidator
 import ru.hytalemodding.lineage.backend.transfer.TransferTokenIssuer
 import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
@@ -50,7 +51,11 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
             }
 
             val validator = TokenValidator(secrets)
-            interceptor = HandshakeInterceptor(validator, config.serverId)
+            val replayProtector = ReplayProtector(
+                config.replayWindowMillis,
+                config.replayMaxEntries,
+            )
+            interceptor = HandshakeInterceptor(validator, config.serverId, replayProtector)
             transferIssuer = TransferTokenIssuer(secrets.first())
 
             eventRegistry.register(PlayerSetupConnectEvent::class.java, this::onPlayerConnect)

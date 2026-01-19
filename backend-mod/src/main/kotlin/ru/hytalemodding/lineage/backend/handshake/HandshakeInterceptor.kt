@@ -7,7 +7,9 @@
  */
 package ru.hytalemodding.lineage.backend.handshake
 
+import ru.hytalemodding.lineage.backend.security.ReplayProtector
 import ru.hytalemodding.lineage.backend.security.TokenValidator
+import ru.hytalemodding.lineage.backend.security.ValidatedProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
@@ -22,6 +24,7 @@ import java.nio.charset.StandardCharsets
 class HandshakeInterceptor(
     private val tokenValidator: TokenValidator,
     private val expectedServerId: String,
+    private val replayProtector: ReplayProtector,
 ) {
     init {
         require(expectedServerId.isNotBlank()) { "expectedServerId must not be blank" }
@@ -41,6 +44,14 @@ class HandshakeInterceptor(
         if (token.isBlank()) {
             throw TokenValidationException(TokenValidationError.MALFORMED, "Empty proxy token referral data")
         }
-        return tokenValidator.validate(token, expectedServerId)
+        val validated = tokenValidator.validate(token, expectedServerId)
+        enforceReplayProtection(validated)
+        return validated.token
+    }
+
+    private fun enforceReplayProtection(validated: ValidatedProxyToken) {
+        if (!replayProtector.tryRegister(validated.replayKey)) {
+            throw TokenValidationException(TokenValidationError.REPLAYED, "Replay detected for ${validated.token.playerId}")
+        }
     }
 }

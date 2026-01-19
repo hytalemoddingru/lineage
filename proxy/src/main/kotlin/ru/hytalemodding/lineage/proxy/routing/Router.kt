@@ -7,6 +7,7 @@
  */
 package ru.hytalemodding.lineage.proxy.routing
 
+import ru.hytalemodding.lineage.api.routing.RoutingContext
 import ru.hytalemodding.lineage.proxy.config.BackendConfig
 
 /**
@@ -16,7 +17,12 @@ interface Router {
     /**
      * Returns the initial backend for a new connection.
      */
-    fun selectInitialBackend(): BackendConfig
+    fun selectInitialBackend(context: RoutingContext): BackendConfig
+
+    /**
+     * Selects a backend for a validated connect request.
+     */
+    fun selectBackend(context: RoutingContext): BackendConfig
 
     /**
      * Finds a backend by its identifier, or null if not found.
