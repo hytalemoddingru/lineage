@@ -9,6 +9,8 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      HYTALE_SERVER_JAR_URL: ${{ secrets.HYTALE_SERVER_JAR_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,5 +20,13 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: gradle
-      - name: Run tests
-        run: ./gradlew :proxy:test :shared:test :backend-mod:test --no-daemon
+      - name: Download HytaleServer.jar
+        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
+        run: |
+          mkdir -p libs
+          curl -fSL "$HYTALE_SERVER_JAR_URL" -o libs/HytaleServer.jar
+      - name: Run proxy/shared tests
+        run: ./gradlew :proxy:test :shared:test --no-daemon
+      - name: Run backend-mod tests
+        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
+        run: ./gradlew :backend-mod:test --no-daemon
