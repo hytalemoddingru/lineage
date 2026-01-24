@@ -24,7 +24,18 @@ const val CURRENT_BACKEND_CONFIG_SCHEMA_VERSION = 1
  * @property messagingHost Proxy host for UDP messaging control channel.
  * @property messagingPort Proxy port for UDP messaging control channel.
  * @property messagingEnabled Whether messaging client should be enabled.
+ * @property controlSenderId Sender identifier for control-plane envelopes.
+ * @property controlMaxPayload Max payload size for control-plane messages.
+ * @property controlReplayWindowMillis Replay window for control-plane messages.
+ * @property controlReplayMaxEntries Max replay entries kept in memory.
+ * @property controlMaxSkewMillis Allowed clock skew for control-plane messages.
+ * @property controlTtlMillis TTL for control-plane envelopes.
+ * @property requireAuthenticatedMode Whether auth-mode must be AUTHENTICATED.
+ * @property agentless Whether backend operates in agentless mode (proxy-token only).
+ * @property javaAgentFallback Whether JavaAgent fallback is enabled.
  * @property enforceProxy Whether invalid or missing proxy tokens should reject login.
+ * @property referralSourceHost Expected referral source host for proxy connections.
+ * @property referralSourcePort Expected referral source port for proxy connections.
  * @property replayWindowMillis Time window for replay protection.
  * @property replayMaxEntries Maximum replay entries kept in memory.
  */
@@ -38,7 +49,18 @@ data class BackendConfig(
     val messagingHost: String,
     val messagingPort: Int,
     val messagingEnabled: Boolean,
+    val controlSenderId: String,
+    val controlMaxPayload: Int,
+    val controlReplayWindowMillis: Long,
+    val controlReplayMaxEntries: Int,
+    val controlMaxSkewMillis: Long,
+    val controlTtlMillis: Long,
+    val requireAuthenticatedMode: Boolean,
+    val agentless: Boolean,
+    val javaAgentFallback: Boolean,
     val enforceProxy: Boolean,
+    val referralSourceHost: String,
+    val referralSourcePort: Int,
     val replayWindowMillis: Long,
     val replayMaxEntries: Int,
 )

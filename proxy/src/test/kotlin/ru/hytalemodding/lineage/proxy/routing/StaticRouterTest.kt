@@ -7,6 +7,7 @@
  */
 package ru.hytalemodding.lineage.proxy.routing
 
+import ru.hytalemodding.lineage.api.protocol.ClientType
 import ru.hytalemodding.lineage.api.routing.RoutingContext
 import ru.hytalemodding.lineage.api.routing.RoutingStrategy
 import ru.hytalemodding.lineage.proxy.config.BackendConfig
@@ -30,7 +31,7 @@ class StaticRouterTest {
     @Test
     fun returnsDefaultBackend() {
         val router = newRouter(sampleConfig())
-        val backend = router.selectInitialBackend(RoutingContext(null, null, null, null, null))
+        val backend = router.selectInitialBackend(sampleContext())
 
         assertEquals("hub", backend.id)
     }
@@ -49,7 +50,7 @@ class StaticRouterTest {
         val router = newRouter(config)
 
         assertThrows(IllegalStateException::class.java) {
-            router.selectInitialBackend(RoutingContext(null, null, null, null, null))
+            router.selectInitialBackend(sampleContext())
         }
     }
 
@@ -70,7 +71,17 @@ class StaticRouterTest {
                 BackendConfig(id = "minigame", host = "127.0.0.1", port = 25567),
             ),
             routing = RoutingConfig(defaultBackendId = "hub"),
-            messaging = MessagingConfig(host = "0.0.0.0", port = 25570, enabled = false),
+            messaging = MessagingConfig(
+                host = "0.0.0.0",
+                port = 25570,
+                enabled = false,
+                controlSenderId = "proxy",
+                controlMaxPayload = 8192,
+                controlReplayWindowMillis = 10_000,
+                controlReplayMaxEntries = 100_000,
+                controlMaxSkewMillis = 120_000,
+                controlTtlMillis = 10_000,
+            ),
             referral = ReferralConfig(host = "127.0.0.1", port = 25565),
             limits = ProtocolLimitsConfig(),
             rateLimits = RateLimitConfig(
@@ -79,6 +90,21 @@ class StaticRouterTest {
                 streamsPerSession = RateLimitWindow(8, 10_000),
                 invalidPacketsPerSession = RateLimitWindow(4, 10_000),
             ),
+        )
+    }
+
+    private fun sampleContext(): RoutingContext {
+        return RoutingContext(
+            playerId = null,
+            username = null,
+            clientAddress = null,
+            requestedBackendId = null,
+            protocolCrc = 0,
+            protocolBuild = 0,
+            clientVersion = "unknown",
+            clientType = ClientType.UNKNOWN,
+            language = "en-US",
+            identityTokenPresent = false,
         )
     }
 }

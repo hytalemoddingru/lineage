@@ -23,6 +23,8 @@ class ProxyTokenTest {
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
             nonceB64 = "nonce-value",
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
         )
         val secret = "proxy-secret".toByteArray()
 

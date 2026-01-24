@@ -14,7 +14,9 @@ interface Command {
     val name: String
     val aliases: List<String>
     val description: String
+    val usage: String
     val permission: String?
+    val flags: Set<CommandFlag>
 
     fun execute(context: CommandContext)
     fun suggest(context: CommandContext): List<String>

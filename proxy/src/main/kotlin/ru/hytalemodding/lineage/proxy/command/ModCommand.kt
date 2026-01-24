@@ -9,6 +9,7 @@ package ru.hytalemodding.lineage.proxy.command
 
 import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
+import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.proxy.mod.ModLoadException
 import ru.hytalemodding.lineage.proxy.mod.ModManager
@@ -22,7 +23,9 @@ class ModCommand(
     override val name: String = "mod"
     override val aliases: List<String> = listOf("mods")
     override val description: String = "Manage loaded mods"
+    override val usage: String = "mod list | mod reload <id|all>"
     override val permission: String? = "lineage.command.mod"
+    override val flags: Set<CommandFlag> = emptySet()
 
     override fun execute(context: CommandContext) {
         val sender = context.sender
@@ -88,6 +91,6 @@ class ModCommand(
     }
 
     private fun sendUsage(sender: CommandSender) {
-        sender.sendMessage("Usage: mod list | mod reload <id|all>")
+        sender.sendMessage("Usage: $usage")
     }
 }

@@ -65,7 +65,7 @@ class TokenValidator(
         }
 
         val token = parsed.token
-        if (token.version != CURRENT_PROXY_TOKEN_VERSION && token.version != LEGACY_PROXY_TOKEN_VERSION) {
+        if (token.version != CURRENT_PROXY_TOKEN_VERSION && token.version != 2 && token.version != LEGACY_PROXY_TOKEN_VERSION) {
             throw TokenValidationException(
                 TokenValidationError.UNSUPPORTED_VERSION,
                 "Unsupported token version: ${token.version}",

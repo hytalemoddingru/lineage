@@ -17,13 +17,16 @@ import java.util.UUID
 class ProxyPlayerImpl(
     override val id: UUID,
     override var username: String,
+    private val transferServiceProvider: () -> PlayerTransferService?,
 ) : ProxyPlayer {
     override var state: PlayerState = PlayerState.CONNECTING
     override var backendId: String? = null
 
     override fun transferTo(backendId: String) {
-        this.backendId = backendId
-        this.state = PlayerState.TRANSFERRING
+        val service = transferServiceProvider()
+        if (service == null || !service.requestTransfer(this, backendId)) {
+            applyTransfer(backendId)
+        }
     }
 
     override fun disconnect(reason: String?) {
@@ -32,5 +35,10 @@ class ProxyPlayerImpl(
 
     override fun sendMessage(message: String) {
         // Placeholder: hook into client stream once message protocol is exposed.
+    }
+
+    internal fun applyTransfer(targetBackendId: String) {
+        backendId = targetBackendId
+        state = PlayerState.TRANSFERRING
     }
 }

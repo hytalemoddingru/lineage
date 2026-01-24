@@ -19,6 +19,7 @@ data class ModInfo(
     val description: String,
     val dependencies: List<String>,
     val softDependencies: List<String>,
+    val capabilities: Set<ModCapability>,
     val website: String?,
     val license: String?,
 )

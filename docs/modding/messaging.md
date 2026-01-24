@@ -2,6 +2,9 @@
 
 Messaging provides UDP channels for proxy and backend communication.
 
+Requires the `MESSAGING` capability in `@LineageModInfo`. Channel ids under the
+`lineage.` namespace are reserved for internal traffic.
+
 Raw channel:
 
 ```kotlin

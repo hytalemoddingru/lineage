@@ -22,6 +22,7 @@ import ru.hytalemodding.lineage.proxy.config.ProxyConfig
 import ru.hytalemodding.lineage.proxy.routing.Router
 import ru.hytalemodding.lineage.api.event.EventBus
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
+import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
 import ru.hytalemodding.lineage.proxy.security.RateLimitService
@@ -42,6 +43,7 @@ class ProxyListener(
     private val rateLimitService: RateLimitService,
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
+    private val transferService: PlayerTransferService,
 ) : AutoCloseable {
     private val logger = Logging.logger(ProxyListener::class.java)
     private val group = NioEventLoopGroup()
@@ -53,7 +55,7 @@ class ProxyListener(
     fun start(): Channel {
         val certs = CertificateUtil.generateSelfSigned()
         val sslContext = QuicSslContextBuilder.forServer(certs.key, null, certs.cert)
-            .applicationProtocols("hytale/1")
+            .applicationProtocols("hytale/2", "hytale/1")
             .clientAuth(ClientAuth.REQUIRE)
             .trustManager(InsecureTrustManagerFactory.INSTANCE)
             .build()
@@ -76,6 +78,7 @@ class ProxyListener(
                         certs,
                         playerManager,
                         eventBus,
+                        transferService,
                         config.referral,
                         config.limits,
                     )

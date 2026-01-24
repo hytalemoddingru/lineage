@@ -106,7 +106,7 @@ class TokenValidatorTest {
     fun rejectsUnsupportedVersion() {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
-        val payload = "3|player-1|hub|1000|2000".toByteArray()
+        val payload = "99|player-1|hub|1000|2000|nonce".toByteArray()
         val signature = Hmac.sign(secret, payload)
         val encoder = Base64.getUrlEncoder().withoutPadding()
         val encoded = "v1.${encoder.encodeToString(payload)}.${encoder.encodeToString(signature)}"

@@ -15,17 +15,17 @@ package ru.hytalemodding.lineage.shared.protocol
  * - Values safe to relax for compatibility (soft): use ProtocolLimitsConfig overrides.
  */
 object ProtocolLimits {
-    const val PROTOCOL_HASH_LENGTH = 64
-    const val MAX_LANGUAGE_LENGTH = 128
+    const val CLIENT_VERSION_LENGTH = 20
+    const val MAX_LANGUAGE_LENGTH = 16
     const val MAX_IDENTITY_TOKEN_LENGTH = 8192
     const val MAX_USERNAME_LENGTH = 16
     const val MAX_REFERRAL_DATA_LENGTH = 4096
     const val MAX_HOST_LENGTH = 256
 
-    const val CONNECT_FIXED_BLOCK_SIZE = 82
+    const val CONNECT_FIXED_BLOCK_SIZE = 46
     const val CONNECT_VARIABLE_FIELD_COUNT = 5
-    const val CONNECT_VARIABLE_BLOCK_START = 102
-    const val CONNECT_MAX_SIZE = 38161
+    const val CONNECT_VARIABLE_BLOCK_START = 66
+    const val CONNECT_MAX_SIZE = 38013
 }
 
 data class ProtocolLimitsConfig(

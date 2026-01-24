@@ -19,8 +19,8 @@ flow intact while still allowing full control over routing and handshake metadat
 ## What it includes
 
 - `proxy`: QUIC/TLS listener, routing, mod loader, messaging
-- `backend-mod`: server-side token validation and fingerprint bridge
-- `agent`: minimal Java agent patch for certificate binding
+- `backend-mod`: server-side token validation (agentless) and optional fingerprint bridge
+- `agent`: legacy Java agent patch for certificate binding (deprecated fallback)
 - `api`: modding API
 - `shared`: shared token and protocol utilities
 
@@ -35,6 +35,7 @@ gradle :proxy:shadowJar :backend-mod:shadowJar :agent:shadowJar
 Prerequisite for backend-mod:
 
 - Place `HytaleServer.jar` in `libs/` (this file is not included in the repo).
+- Ensure the server is running in AUTHENTICATED mode.
 
 Run the proxy:
 
@@ -47,25 +48,29 @@ Optional: pass a custom config path instead of the default `config.toml` in the 
 Install backend pieces:
 
 - Copy `backend-mod/build/libs/lineage-backend-mod-<version>.jar` into the server mods folder.
-- Optional: start the server with `-javaagent:/path/to/lineage-agent-<version>.jar` when certificate binding requires it. Prefer patched/early-plugin modes when available.
+- Agentless mode is the default and recommended path.
+- Optional (deprecated): start the server with `-javaagent:/path/to/lineage-agent-<version>.jar` only if `javaagent_fallback = true` is enabled in backend config.
 
 Configure:
 
 - Proxy config: `config.toml` (auto-created on first run).
 - Backend config: `<server data dir>/config.toml` (auto-created on first run).
 - `security.proxy_secret` must match backend `proxy_secret`.
+- Proxy `messaging.host`/`messaging.port` must match backend `messaging_host`/`messaging_port` when messaging is enabled.
+- Keep `messaging.enabled` and backend `messaging_enabled` consistent across nodes.
 
 Config highlights:
 
 - `referral.host` / `referral.port` define the referral source injected into Connect.
 - `limits.*` controls protocol sanity limits (language, identity token, username, referral data, host, connect size).
 - `rate_limits.*` provides basic per-IP and per-session abuse protection.
-- Backend config adds `replay_window_millis` and `replay_max_entries` for replay protection.
-- Proxy tokens use a nonce-enabled format (v2) with v1 compatibility.
+- Backend config adds `agentless` (default), `javaagent_fallback`, `require_authenticated_mode`, `replay_window_millis`, and `replay_max_entries` for security controls.
+- Proxy tokens use v3 (nonce + cert binding) with v1/v2 compatibility.
 
 Transfer:
 
-- Use `/lineage transfer <backendId>` on the backend server to issue a referral to the proxy.
+- Use `/transfer <backendId>` on the backend server to issue a referral to the proxy.
+- If a command name conflict exists, use `/lineage:transfer <backendId>`.
 
 ## Documentation
 
@@ -77,8 +82,8 @@ Gradle Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("ru.hytalemodding.lineage:api:0.2.0")
-    implementation("ru.hytalemodding.lineage:shared:0.2.0")
+    implementation("ru.hytalemodding.lineage:api:0.3.0")
+    implementation("ru.hytalemodding.lineage:shared:0.3.0")
 }
 ```
 
@@ -86,8 +91,8 @@ Gradle Groovy DSL:
 
 ```groovy
 dependencies {
-    implementation "ru.hytalemodding.lineage:api:0.2.0"
-    implementation "ru.hytalemodding.lineage:shared:0.2.0"
+    implementation "ru.hytalemodding.lineage:api:0.3.0"
+    implementation "ru.hytalemodding.lineage:shared:0.3.0"
 }
 ```
 
@@ -98,12 +103,12 @@ Maven:
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>api</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
   </dependency>
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>shared</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
   </dependency>
 </dependencies>
 ```

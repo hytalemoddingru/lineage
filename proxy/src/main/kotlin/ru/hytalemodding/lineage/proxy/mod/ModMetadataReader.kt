@@ -11,6 +11,7 @@ import org.objectweb.asm.AnnotationVisitor
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
+import ru.hytalemodding.lineage.api.mod.ModCapability
 import ru.hytalemodding.lineage.api.mod.ModInfo
 import java.io.InputStream
 import java.nio.file.Files
@@ -66,6 +67,7 @@ object ModMetadataReader {
             description = data.description ?: "",
             dependencies = data.dependencies,
             softDependencies = data.softDependencies,
+            capabilities = data.capabilities.toSet(),
             website = data.website?.ifBlank { null },
             license = data.license?.ifBlank { null },
         )
@@ -109,6 +111,7 @@ object ModMetadataReader {
         val authors: MutableList<String> = mutableListOf()
         val dependencies: MutableList<String> = mutableListOf()
         val softDependencies: MutableList<String> = mutableListOf()
+        val capabilities: MutableSet<ModCapability> = linkedSetOf()
         var website: String? = null
         var license: String? = null
     }
@@ -133,11 +136,22 @@ object ModMetadataReader {
                 "authors" -> data.authors
                 "dependencies" -> data.dependencies
                 "softDependencies" -> data.softDependencies
-                else -> mutableListOf()
+                else -> null
+            }
+            if (name == "capabilities") {
+                return object : AnnotationVisitor(Opcodes.ASM9) {
+                    override fun visitEnum(name: String?, descriptor: String?, value: String) {
+                        try {
+                            data.capabilities.add(ModCapability.valueOf(value))
+                        } catch (ex: IllegalArgumentException) {
+                            throw ModLoadException("Unknown capability $value in @LineageModInfo")
+                        }
+                    }
+                }
             }
             return object : AnnotationVisitor(Opcodes.ASM9) {
                 override fun visit(name: String?, value: Any) {
-                    target.add(value as String)
+                    target?.add(value as String)
                 }
             }
         }

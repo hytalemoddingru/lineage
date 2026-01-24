@@ -8,6 +8,7 @@
 package ru.hytalemodding.lineage.proxy
 
 import ru.hytalemodding.lineage.proxy.config.TomlLoader
+import ru.hytalemodding.lineage.api.protocol.ClientType
 import ru.hytalemodding.lineage.api.routing.RoutingContext
 import ru.hytalemodding.lineage.api.routing.RoutingStrategy
 import ru.hytalemodding.lineage.proxy.routing.StaticRoutingStrategy
@@ -50,7 +51,18 @@ class ProxySmokeTest {
         services.register(RoutingStrategy.SERVICE_KEY, strategy)
         val router = StrategyRouter(config, services, strategy)
         val backend = router.selectInitialBackend(
-            RoutingContext(null, null, null, null, null)
+            RoutingContext(
+                playerId = null,
+                username = null,
+                clientAddress = null,
+                requestedBackendId = null,
+                protocolCrc = 0,
+                protocolBuild = 0,
+                clientVersion = "unknown",
+                clientType = ClientType.UNKNOWN,
+                language = "en-US",
+                identityTokenPresent = false,
+            )
         )
         val tokenService = TokenService(
             secret = config.security.proxySecret.toByteArray(StandardCharsets.UTF_8),

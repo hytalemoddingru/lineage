@@ -34,7 +34,12 @@ class TokenService(
     /**
      * Issues a signed proxy token for the given [playerId] and [targetServerId].
      */
-    fun issueToken(playerId: String, targetServerId: String, clientCertB64: String? = null): String {
+    fun issueToken(
+        playerId: String,
+        targetServerId: String,
+        clientCertB64: String? = null,
+        proxyCertB64: String? = null,
+    ): String {
         val now = clock.nowMillis()
         val nonceB64 = generateNonce()
         val token = ProxyToken(
@@ -44,6 +49,7 @@ class TokenService(
             issuedAtMillis = now,
             expiresAtMillis = now + tokenTtlMillis,
             clientCertB64 = clientCertB64,
+            proxyCertB64 = proxyCertB64,
             nonceB64 = nonceB64,
         )
         return ProxyTokenCodec.encode(token, secret)

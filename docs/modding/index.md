@@ -2,6 +2,7 @@
 
 This documentation covers the public API used to build Lineage mods.
 The same Markdown files are used for Dokka and GitHub docs to keep them in sync.
+Some features require explicit capabilities declared in `@LineageModInfo`.
 
 ## Contents
 

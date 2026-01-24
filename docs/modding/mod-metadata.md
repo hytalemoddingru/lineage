@@ -12,7 +12,20 @@ Fields:
 - `description`: optional text
 - `dependencies`: required dependencies
 - `softDependencies`: optional dependencies
+- `capabilities`: explicit access to privileged APIs
 - `website`, `license`: optional strings
+
+Capabilities:
+
+- `COMMANDS`
+- `MESSAGING`
+- `PLAYERS`
+- `BACKENDS`
+- `ROUTING`
+- `SECURITY`
+- `PERMISSIONS`
+- `SCHEDULER`
+- `SERVICES`
 
 Dependency entries accept version constraints:
 

@@ -74,7 +74,18 @@ object BackendConfigLoader {
             messagingHost = DEFAULT_MESSAGING_HOST,
             messagingPort = DEFAULT_MESSAGING_PORT,
             messagingEnabled = true,
+            controlSenderId = defaultServerId,
+            controlMaxPayload = DEFAULT_CONTROL_MAX_PAYLOAD,
+            controlReplayWindowMillis = DEFAULT_CONTROL_REPLAY_WINDOW_MILLIS,
+            controlReplayMaxEntries = DEFAULT_CONTROL_REPLAY_MAX_ENTRIES,
+            controlMaxSkewMillis = DEFAULT_CONTROL_MAX_SKEW_MILLIS,
+            controlTtlMillis = DEFAULT_CONTROL_TTL_MILLIS,
+            requireAuthenticatedMode = true,
+            agentless = true,
+            javaAgentFallback = false,
             enforceProxy = true,
+            referralSourceHost = DEFAULT_PROXY_CONNECT_HOST,
+            referralSourcePort = DEFAULT_PROXY_CONNECT_PORT,
             replayWindowMillis = DEFAULT_REPLAY_WINDOW_MILLIS,
             replayMaxEntries = DEFAULT_REPLAY_MAX_ENTRIES,
         )
@@ -92,7 +103,18 @@ object BackendConfigLoader {
         val messagingHost = resolveMessagingHost(result)
         val messagingPort = resolveMessagingPort(result)
         val messagingEnabled = result.getBoolean("messaging_enabled") ?: true
+        val controlSenderId = resolveControlSenderId(result, serverId)
+        val controlMaxPayload = resolveControlMaxPayload(result)
+        val controlReplayWindowMillis = resolveControlReplayWindow(result)
+        val controlReplayMaxEntries = resolveControlReplayMaxEntries(result)
+        val controlMaxSkewMillis = resolveControlMaxSkew(result)
+        val controlTtlMillis = resolveControlTtl(result)
+        val requireAuthenticatedMode = result.getBoolean("require_authenticated_mode") ?: true
+        val agentless = result.getBoolean("agentless") ?: true
+        val javaAgentFallback = result.getBoolean("javaagent_fallback") ?: false
         val enforceProxy = result.getBoolean("enforce_proxy") ?: true
+        val referralSourceHost = resolveReferralSourceHost(result, proxyConnectHost)
+        val referralSourcePort = resolveReferralSourcePort(result, proxyConnectPort)
         val replayWindowMillis = resolveReplayWindow(result)
         val replayMaxEntries = resolveReplayMaxEntries(result)
         return BackendConfig(
@@ -105,7 +127,18 @@ object BackendConfigLoader {
             messagingHost = messagingHost,
             messagingPort = messagingPort,
             messagingEnabled = messagingEnabled,
+            controlSenderId = controlSenderId,
+            controlMaxPayload = controlMaxPayload,
+            controlReplayWindowMillis = controlReplayWindowMillis,
+            controlReplayMaxEntries = controlReplayMaxEntries,
+            controlMaxSkewMillis = controlMaxSkewMillis,
+            controlTtlMillis = controlTtlMillis,
+            requireAuthenticatedMode = requireAuthenticatedMode,
+            agentless = agentless,
+            javaAgentFallback = javaAgentFallback,
             enforceProxy = enforceProxy,
+            referralSourceHost = referralSourceHost,
+            referralSourcePort = referralSourcePort,
             replayWindowMillis = replayWindowMillis,
             replayMaxEntries = replayMaxEntries,
         )
@@ -153,9 +186,20 @@ object BackendConfigLoader {
             }
             writer.appendLine("proxy_connect_host = \"${config.proxyConnectHost}\"")
             writer.appendLine("proxy_connect_port = ${config.proxyConnectPort}")
+            writer.appendLine("referral_source_host = \"${config.referralSourceHost}\"")
+            writer.appendLine("referral_source_port = ${config.referralSourcePort}")
             writer.appendLine("messaging_host = \"${config.messagingHost}\"")
             writer.appendLine("messaging_port = ${config.messagingPort}")
             writer.appendLine("messaging_enabled = ${config.messagingEnabled}")
+            writer.appendLine("control_sender_id = \"${config.controlSenderId}\"")
+            writer.appendLine("control_max_payload = ${config.controlMaxPayload}")
+            writer.appendLine("control_replay_window_millis = ${config.controlReplayWindowMillis}")
+            writer.appendLine("control_replay_max_entries = ${config.controlReplayMaxEntries}")
+            writer.appendLine("control_max_skew_millis = ${config.controlMaxSkewMillis}")
+            writer.appendLine("control_ttl_millis = ${config.controlTtlMillis}")
+            writer.appendLine("require_authenticated_mode = ${config.requireAuthenticatedMode}")
+            writer.appendLine("agentless = ${config.agentless}")
+            writer.appendLine("javaagent_fallback = ${config.javaAgentFallback}")
             writer.appendLine("enforce_proxy = ${config.enforceProxy}")
             writer.appendLine("replay_window_millis = ${config.replayWindowMillis}")
             writer.appendLine("replay_max_entries = ${config.replayMaxEntries}")
@@ -204,6 +248,22 @@ object BackendConfigLoader {
         return port.toInt()
     }
 
+    private fun resolveReferralSourceHost(result: TomlParseResult, proxyConnectHost: String): String {
+        val rawHost = result.getString("referral_source_host") ?: proxyConnectHost
+        if (rawHost.isBlank()) {
+            throw ConfigException("referral_source_host must not be blank")
+        }
+        return rawHost
+    }
+
+    private fun resolveReferralSourcePort(result: TomlParseResult, proxyConnectPort: Int): Int {
+        val port = result.getLong("referral_source_port") ?: proxyConnectPort.toLong()
+        if (port !in 1..65535) {
+            throw ConfigException("referral_source_port must be between 1 and 65535")
+        }
+        return port.toInt()
+    }
+
     private fun resolveReplayWindow(result: TomlParseResult): Long {
         val window = result.getLong("replay_window_millis") ?: DEFAULT_REPLAY_WINDOW_MILLIS
         if (window <= 0) {
@@ -220,10 +280,63 @@ object BackendConfigLoader {
         return value.toInt()
     }
 
+    private fun resolveControlSenderId(result: TomlParseResult, serverId: String): String {
+        val value = result.getString("control_sender_id") ?: serverId
+        if (value.isBlank()) {
+            throw ConfigException("control_sender_id must not be blank")
+        }
+        return value
+    }
+
+    private fun resolveControlMaxPayload(result: TomlParseResult): Int {
+        val value = result.getLong("control_max_payload") ?: DEFAULT_CONTROL_MAX_PAYLOAD.toLong()
+        if (value <= 0 || value > Int.MAX_VALUE) {
+            throw ConfigException("control_max_payload must be a positive integer")
+        }
+        return value.toInt()
+    }
+
+    private fun resolveControlReplayWindow(result: TomlParseResult): Long {
+        val value = result.getLong("control_replay_window_millis") ?: DEFAULT_CONTROL_REPLAY_WINDOW_MILLIS
+        if (value <= 0) {
+            throw ConfigException("control_replay_window_millis must be > 0")
+        }
+        return value
+    }
+
+    private fun resolveControlReplayMaxEntries(result: TomlParseResult): Int {
+        val value = result.getLong("control_replay_max_entries") ?: DEFAULT_CONTROL_REPLAY_MAX_ENTRIES.toLong()
+        if (value <= 0 || value > Int.MAX_VALUE) {
+            throw ConfigException("control_replay_max_entries must be a positive integer")
+        }
+        return value.toInt()
+    }
+
+    private fun resolveControlMaxSkew(result: TomlParseResult): Long {
+        val value = result.getLong("control_max_skew_millis") ?: DEFAULT_CONTROL_MAX_SKEW_MILLIS
+        if (value < 0) {
+            throw ConfigException("control_max_skew_millis must be >= 0")
+        }
+        return value
+    }
+
+    private fun resolveControlTtl(result: TomlParseResult): Long {
+        val value = result.getLong("control_ttl_millis") ?: DEFAULT_CONTROL_TTL_MILLIS
+        if (value <= 0) {
+            throw ConfigException("control_ttl_millis must be > 0")
+        }
+        return value
+    }
+
     private const val DEFAULT_PROXY_CONNECT_HOST = "127.0.0.1"
     private const val DEFAULT_PROXY_CONNECT_PORT = 25565
     private const val DEFAULT_MESSAGING_HOST = "127.0.0.1"
     private const val DEFAULT_MESSAGING_PORT = 25570
     private const val DEFAULT_REPLAY_WINDOW_MILLIS = 10_000L
     private const val DEFAULT_REPLAY_MAX_ENTRIES = 100_000
+    private const val DEFAULT_CONTROL_MAX_PAYLOAD = 8192
+    private const val DEFAULT_CONTROL_REPLAY_WINDOW_MILLIS = 10_000L
+    private const val DEFAULT_CONTROL_REPLAY_MAX_ENTRIES = 100_000
+    private const val DEFAULT_CONTROL_MAX_SKEW_MILLIS = 120_000L
+    private const val DEFAULT_CONTROL_TTL_MILLIS = 10_000L
 }

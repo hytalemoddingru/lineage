@@ -13,7 +13,11 @@ package ru.hytalemodding.lineage.api.player
 enum class PlayerState {
     CONNECTING,
     HANDSHAKING,
+    AUTHENTICATED,
     PLAYING,
+    /**
+     * Transitional state while moving between backends; availability is not guaranteed.
+     */
     TRANSFERRING,
     DISCONNECTED,
 }

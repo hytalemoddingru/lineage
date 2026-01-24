@@ -20,16 +20,18 @@ import ru.hytalemodding.lineage.proxy.net.handler.StreamBridge
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
 import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
 import ru.hytalemodding.lineage.proxy.routing.Router
+import ru.hytalemodding.lineage.proxy.routing.RoutingDeniedException
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
 import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.session.SessionManager
 import ru.hytalemodding.lineage.proxy.util.CertificateUtil
 import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.api.protocol.ClientType
 import ru.hytalemodding.lineage.proxy.config.ReferralConfig
 import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import java.net.InetSocketAddress
-import java.security.MessageDigest
+import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -47,6 +49,7 @@ class QuicSessionHandler(
     private val certs: CertificateUtil.CertPair,
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
+    private val transferService: PlayerTransferService,
     private val referralConfig: ReferralConfig,
     private val protocolLimits: ProtocolLimitsConfig,
 ) : ChannelInboundHandlerAdapter() {
@@ -62,7 +65,6 @@ class QuicSessionHandler(
     private var clientChannel: QuicChannel? = null
     private var remoteKey: String = "unknown"
     private var clientAddress: InetSocketAddress? = null
-    private val transferService = PlayerTransferService(eventBus)
 
     override fun channelActive(ctx: ChannelHandlerContext) {
         val clientChannel = ctx.channel() as QuicChannel
@@ -78,20 +80,29 @@ class QuicSessionHandler(
         logger.info("New connection from {}", clientChannel.remoteAddress())
         session.attachClient(clientChannel)
 
-        try {
-            val hash = MessageDigest.getInstance("SHA-256").digest(certs.cert.encoded)
-            session.clientCertB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(hash)
-        } catch (e: Exception) {}
+        session.clientCertB64 = extractClientCertB64(clientChannel)
+        session.proxyCertB64 = encodeCertificate(certs.cert)
 
         val context = RoutingContext(
             playerId = null,
             username = null,
             clientAddress = clientAddress,
-            protocolHash = null,
             requestedBackendId = null,
+            protocolCrc = 0,
+            protocolBuild = 0,
+            clientVersion = "unknown",
+            clientType = ClientType.UNKNOWN,
+            language = "en-US",
+            identityTokenPresent = false,
         )
-        val backend = router.selectInitialBackend(context)
-        session.selectedBackendId = backend.id
+        try {
+            val backend = router.selectInitialBackend(context)
+            session.selectedBackendId = backend.id
+        } catch (ex: RoutingDeniedException) {
+            logger.warn("Initial route denied for {}: {}", remoteKey, ex.reason)
+            clientChannel.close()
+            return
+        }
     }
 
     /**
@@ -219,7 +230,7 @@ class QuicSessionHandler(
         backendConnectFuture = future
 
         val sslContext = QuicSslContextBuilder.forClient()
-            .applicationProtocols("hytale/1")
+            .applicationProtocols("hytale/2", "hytale/1")
             .trustManager(InsecureTrustManagerFactory.INSTANCE)
             .keyManager(certs.key, null, certs.cert)
             .build()
@@ -279,5 +290,23 @@ class QuicSessionHandler(
                 clientChannel.close()
             }
         }
+    }
+
+    private fun extractClientCertB64(channel: QuicChannel): String? {
+        return try {
+            val sslEngine = channel.sslEngine() ?: return null
+            val peerCerts = sslEngine.session.peerCertificates
+            val cert = peerCerts.firstOrNull { it is X509Certificate } as? X509Certificate ?: return null
+            encodeCertificate(cert)
+        } catch (e: Exception) {
+            logger.warn("Failed to capture client certificate", e)
+            null
+        }
+    }
+
+    private fun encodeCertificate(cert: X509Certificate): String? {
+        return runCatching {
+            Base64.getUrlEncoder().withoutPadding().encodeToString(cert.encoded)
+        }.getOrNull()
     }
 }

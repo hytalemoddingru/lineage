@@ -21,9 +21,11 @@ class ConnectPacketCodecTest {
     @Test
     fun encodeDecodeRoundTripWithOptionalFields() {
         val packet = ConnectPacket(
-            protocolHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            protocolCrc = 1789265863,
+            protocolBuildNumber = 2,
+            clientVersion = "client-1",
             clientType = 1,
-            language = "en",
+            language = "en-US",
             identityToken = "identity-token",
             uuid = UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
             username = "PlayerOne",
@@ -37,7 +39,9 @@ class ConnectPacketCodecTest {
 
         val decoded = ConnectPacketCodec.decode(buffer)
 
-        assertEquals(packet.protocolHash, decoded.protocolHash)
+        assertEquals(packet.protocolCrc, decoded.protocolCrc)
+        assertEquals(packet.protocolBuildNumber, decoded.protocolBuildNumber)
+        assertEquals(packet.clientVersion, decoded.clientVersion)
         assertEquals(packet.clientType, decoded.clientType)
         assertEquals(packet.language, decoded.language)
         assertEquals(packet.identityToken, decoded.identityToken)
@@ -50,9 +54,11 @@ class ConnectPacketCodecTest {
     @Test
     fun encodeDecodeRoundTripWithMissingOptionalFields() {
         val packet = ConnectPacket(
-            protocolHash = "short-hash",
+            protocolCrc = 1789265863,
+            protocolBuildNumber = 2,
+            clientVersion = "client-2",
             clientType = 2,
-            language = null,
+            language = "en",
             identityToken = null,
             uuid = UUID.fromString("223e4567-e89b-12d3-a456-426614174000"),
             username = "PlayerTwo",
@@ -66,9 +72,11 @@ class ConnectPacketCodecTest {
 
         val decoded = ConnectPacketCodec.decode(buffer)
 
-        assertEquals(packet.protocolHash, decoded.protocolHash)
+        assertEquals(packet.protocolCrc, decoded.protocolCrc)
+        assertEquals(packet.protocolBuildNumber, decoded.protocolBuildNumber)
+        assertEquals(packet.clientVersion, decoded.clientVersion)
         assertEquals(packet.clientType, decoded.clientType)
-        assertNull(decoded.language)
+        assertEquals(packet.language, decoded.language)
         assertNull(decoded.identityToken)
         assertEquals(packet.uuid, decoded.uuid)
         assertEquals(packet.username, decoded.username)
@@ -79,7 +87,9 @@ class ConnectPacketCodecTest {
     @Test
     fun decodeRejectsUsernameOverLimit() {
         val packet = ConnectPacket(
-            protocolHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            protocolCrc = 1789265863,
+            protocolBuildNumber = 2,
+            clientVersion = "client-3",
             clientType = 1,
             language = "en",
             identityToken = null,

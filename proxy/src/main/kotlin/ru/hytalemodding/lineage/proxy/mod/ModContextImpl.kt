@@ -13,6 +13,7 @@ import ru.hytalemodding.lineage.api.command.CommandRegistry
 import ru.hytalemodding.lineage.api.config.ConfigManager
 import ru.hytalemodding.lineage.api.event.EventBus
 import ru.hytalemodding.lineage.api.messaging.Messaging
+import ru.hytalemodding.lineage.api.mod.ModCapability
 import ru.hytalemodding.lineage.api.mod.ModContext
 import ru.hytalemodding.lineage.api.mod.ModInfo
 import ru.hytalemodding.lineage.api.permission.PermissionChecker
@@ -26,6 +27,7 @@ import java.nio.file.Path
  */
 class ModContextImpl(
     override val modInfo: ModInfo,
+    override val capabilities: Set<ModCapability>,
     override val logger: Logger,
     override val dataDirectory: Path,
     override val configManager: ConfigManager,

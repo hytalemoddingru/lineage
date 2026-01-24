@@ -89,11 +89,23 @@ data class RoutingConfig(
  * @property host Bind host for UDP messaging.
  * @property port Bind port for UDP messaging.
  * @property enabled Whether messaging server is enabled.
+ * @property controlSenderId Sender identifier for control-plane envelopes.
+ * @property controlMaxPayload Max payload size for control-plane messages.
+ * @property controlReplayWindowMillis Replay window for control-plane messages.
+ * @property controlReplayMaxEntries Max replay entries kept in memory.
+ * @property controlMaxSkewMillis Allowed clock skew for control-plane messages.
+ * @property controlTtlMillis TTL for control-plane envelopes.
  */
 data class MessagingConfig(
     val host: String,
     val port: Int,
     val enabled: Boolean,
+    val controlSenderId: String,
+    val controlMaxPayload: Int,
+    val controlReplayWindowMillis: Long,
+    val controlReplayMaxEntries: Int,
+    val controlMaxSkewMillis: Long,
+    val controlTtlMillis: Long,
 )
 
 /**

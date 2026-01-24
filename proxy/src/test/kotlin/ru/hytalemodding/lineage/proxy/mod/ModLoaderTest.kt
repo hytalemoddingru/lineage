@@ -54,6 +54,7 @@ class ModLoaderTest {
             description = "",
             dependencies = emptyList(),
             softDependencies = emptyList(),
+            capabilities = emptySet(),
             website = null,
             license = null,
         )

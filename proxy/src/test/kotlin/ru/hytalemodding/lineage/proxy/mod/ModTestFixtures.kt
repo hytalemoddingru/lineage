@@ -16,6 +16,7 @@ import ru.hytalemodding.lineage.api.command.CommandRegistry
 import ru.hytalemodding.lineage.api.config.ConfigManager
 import ru.hytalemodding.lineage.api.event.EventBus
 import ru.hytalemodding.lineage.api.messaging.Messaging
+import ru.hytalemodding.lineage.api.mod.ModCapability
 import ru.hytalemodding.lineage.api.mod.ModContext
 import ru.hytalemodding.lineage.api.mod.ModInfo
 import ru.hytalemodding.lineage.api.permission.PermissionChecker
@@ -94,6 +95,7 @@ private fun buildModClass(className: String, info: ModInfo): ByteArray {
     visitArray(annotation, "authors", info.authors)
     visitArray(annotation, "dependencies", info.dependencies)
     visitArray(annotation, "softDependencies", info.softDependencies)
+    visitEnumArray(annotation, "capabilities", info.capabilities)
     annotation.visitEnd()
 
     val ctor = writer.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null)
@@ -132,6 +134,21 @@ private fun visitArray(
     array.visitEnd()
 }
 
+private fun visitEnumArray(
+    annotation: org.objectweb.asm.AnnotationVisitor,
+    name: String,
+    values: Set<ModCapability>,
+) {
+    if (values.isEmpty()) {
+        return
+    }
+    val array = annotation.visitArray(name)
+    for (value in values) {
+        array.visitEnum(null, "Lru/hytalemodding/lineage/api/mod/ModCapability;", value.name)
+    }
+    array.visitEnd()
+}
+
 private fun addHookMethod(writer: ClassWriter, name: String, marker: String) {
     val method = writer.visitMethod(Opcodes.ACC_PUBLIC, name, "()V", null, null)
     method.visitCode()
@@ -152,6 +169,7 @@ private class TestModContext(
     override val modInfo: ModInfo,
     override val dataDirectory: Path,
 ) : ModContext {
+    override val capabilities: Set<ModCapability> = modInfo.capabilities
     override val logger = LoggerFactory.getLogger("test")
     override val configManager: ConfigManager = ConfigManagerImpl(dataDirectory)
     override val eventBus: EventBus = EventBusImpl()

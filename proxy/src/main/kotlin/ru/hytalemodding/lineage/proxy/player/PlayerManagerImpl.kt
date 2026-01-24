@@ -16,6 +16,14 @@ import java.util.concurrent.ConcurrentHashMap
  * Thread-safe player manager implementation.
  */
 class PlayerManagerImpl : PlayerManager {
+    private val transferServiceProvider: () -> PlayerTransferService?
+
+    constructor(transferServiceProvider: () -> PlayerTransferService?) {
+        this.transferServiceProvider = transferServiceProvider
+    }
+
+    constructor() : this({ null })
+
     private val players = ConcurrentHashMap<UUID, ProxyPlayerImpl>()
 
     override fun get(id: UUID): ProxyPlayer? = players[id]
@@ -31,7 +39,7 @@ class PlayerManagerImpl : PlayerManager {
             existing.username = username
             return existing
         }
-        val created = ProxyPlayerImpl(id, username)
+        val created = ProxyPlayerImpl(id, username, transferServiceProvider)
         players[id] = created
         return created
     }

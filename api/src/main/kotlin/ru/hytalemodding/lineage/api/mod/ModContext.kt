@@ -24,6 +24,7 @@ import java.nio.file.Path
  */
 interface ModContext {
     val modInfo: ModInfo
+    val capabilities: Set<ModCapability>
     val logger: Logger
     val dataDirectory: Path
     val configManager: ConfigManager

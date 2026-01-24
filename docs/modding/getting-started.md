@@ -12,7 +12,7 @@ Kotlin:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.1.0",
+    apiVersion = "0.3.0",
     authors = ["YourName"]
 )
 class HelloMod : LineageMod() {
@@ -29,7 +29,7 @@ Java:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.1.0",
+    apiVersion = "0.3.0",
     authors = {"YourName"}
 )
 public final class HelloMod extends LineageMod {
@@ -37,6 +37,37 @@ public final class HelloMod extends LineageMod {
     public void onEnable() {
         context.getLogger().info("Hello from Lineage!");
     }
+}
+```
+
+## Capabilities
+
+Mods run without privileged capabilities by default. Declare the minimum set you need:
+
+Kotlin:
+
+```kotlin
+@LineageModInfo(
+    id = "hello",
+    name = "Hello Mod",
+    version = "1.0.0",
+    apiVersion = "0.3.0",
+    capabilities = [ModCapability.MESSAGING, ModCapability.PLAYERS]
+)
+class HelloMod : LineageMod()
+```
+
+Java:
+
+```java
+@LineageModInfo(
+    id = "hello",
+    name = "Hello Mod",
+    version = "1.0.0",
+    apiVersion = "0.3.0",
+    capabilities = {ModCapability.MESSAGING, ModCapability.PLAYERS}
+)
+public final class HelloMod extends LineageMod {
 }
 ```
 
@@ -54,7 +85,7 @@ Gradle Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("ru.hytalemodding.lineage:api:0.1.0")
+    implementation("ru.hytalemodding.lineage:api:0.3.0")
 }
 ```
 
@@ -62,7 +93,7 @@ Gradle Groovy DSL:
 
 ```groovy
 dependencies {
-    implementation "ru.hytalemodding.lineage:api:0.1.0"
+    implementation "ru.hytalemodding.lineage:api:0.3.0"
 }
 ```
 
@@ -72,7 +103,7 @@ Maven:
 <dependency>
   <groupId>ru.hytalemodding.lineage</groupId>
   <artifactId>api</artifactId>
-  <version>0.1.0</version>
+  <version>0.3.0</version>
 </dependency>
 ```
 

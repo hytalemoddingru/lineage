@@ -18,4 +18,7 @@ Registration:
 context.eventBus.register(ExampleListener())
 ```
 
+Routing events require the `ROUTING` capability.
+Security events require the `SECURITY` capability.
+
 To stop listening, call `unregister` with the same listener instance.

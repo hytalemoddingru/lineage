@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
+import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.messaging.Channel
 import ru.hytalemodding.lineage.api.messaging.Message
 import ru.hytalemodding.lineage.api.messaging.MessageHandler
@@ -53,7 +54,9 @@ class PlayerCommandGatewayTest {
     ) : Command {
         override val aliases: List<String> = emptyList()
         override val description: String = "test"
+        override val usage: String = "ping"
         override val permission: String? = null
+        override val flags: Set<CommandFlag> = emptySet()
 
         override fun execute(context: CommandContext) {
             context.sender.sendMessage(response)

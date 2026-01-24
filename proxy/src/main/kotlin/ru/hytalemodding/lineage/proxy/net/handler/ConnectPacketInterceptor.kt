@@ -19,10 +19,12 @@ import ru.hytalemodding.lineage.proxy.event.player.PlayerConnectEvent
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
 import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
 import ru.hytalemodding.lineage.api.routing.RoutingContext
+import ru.hytalemodding.lineage.api.protocol.ClientType
 import ru.hytalemodding.lineage.proxy.protocol.CONNECT_PACKET_ID
 import ru.hytalemodding.lineage.proxy.protocol.ConnectPacketCodec
 import ru.hytalemodding.lineage.proxy.protocol.HostAddress
 import ru.hytalemodding.lineage.proxy.routing.Router
+import ru.hytalemodding.lineage.proxy.routing.RoutingDeniedException
 import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
@@ -133,8 +135,22 @@ class ConnectPacketInterceptor(
                 recordInvalidAndClose(ctx, buf)
                 return
             }
+            logger.info(
+                "Client {} ({}) protocol crc={}, build={}, version={}",
+                connect.username,
+                connect.uuid,
+                connect.protocolCrc,
+                connect.protocolBuildNumber,
+                connect.clientVersion,
+            )
             session.playerId = connect.uuid.toString()
-            val backendId = resolveBackend(connect)
+            val backendId = try {
+                resolveBackend(connect)
+            } catch (ex: RoutingDeniedException) {
+                logger.warn("Route denied for {} ({}): {}", connect.username, connect.uuid, ex.reason)
+                rejectAndClose(ctx, buf)
+                return
+            }
             val isNewPlayer = playerManager.get(connect.uuid) == null
             val player = playerManager.getOrCreate(connect.uuid, connect.username)
             if (isNewPlayer) {
@@ -147,7 +163,19 @@ class ConnectPacketInterceptor(
             } else {
                 transferService.transfer(player, backendId)
             }
-            val token = tokenService.issueToken(connect.uuid.toString(), backendId, session.clientCertB64)
+            val clientCertB64 = session.clientCertB64
+            if (clientCertB64.isNullOrBlank()) {
+                logger.warn("Missing client certificate for {} ({})", connect.username, connect.uuid)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
+            val proxyCertB64 = session.proxyCertB64
+            if (proxyCertB64.isNullOrBlank()) {
+                logger.warn("Missing proxy certificate for {} ({})", connect.username, connect.uuid)
+                recordInvalidAndClose(ctx, buf)
+                return
+            }
+            val token = tokenService.issueToken(connect.uuid.toString(), backendId, clientCertB64, proxyCertB64)
             val tokenBytes = token.toByteArray(StandardCharsets.UTF_8)
             if (tokenBytes.size > protocolLimits.maxReferralDataLength) {
                 logger.warn("Issued token exceeds referralData limit ({} > {})", tokenBytes.size, protocolLimits.maxReferralDataLength)
@@ -248,6 +276,16 @@ class ConnectPacketInterceptor(
         }
     }
 
+    private fun rejectAndClose(ctx: ChannelHandlerContext, msg: Any) {
+        try {
+            if (ReferenceCountUtil.refCnt(msg) > 0) {
+                ReferenceCountUtil.release(msg)
+            }
+        } finally {
+            ctx.close()
+        }
+    }
+
     /**
      * Resolves the backend ID using transfer token referral data when present.
      */
@@ -272,8 +310,13 @@ class ConnectPacketInterceptor(
             playerId = connect.uuid,
             username = connect.username,
             clientAddress = clientAddress,
-            protocolHash = connect.protocolHash,
             requestedBackendId = requestedBackendId,
+            protocolCrc = connect.protocolCrc,
+            protocolBuild = connect.protocolBuildNumber,
+            clientVersion = connect.clientVersion,
+            clientType = ClientType.fromId(connect.clientType),
+            language = connect.language,
+            identityTokenPresent = !connect.identityToken.isNullOrBlank(),
         )
         val backend = router.selectBackend(context)
         session.selectedBackendId = backend.id

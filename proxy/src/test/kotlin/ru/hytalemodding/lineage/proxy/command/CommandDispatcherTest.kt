@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
+import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.api.command.SenderType
 import ru.hytalemodding.lineage.proxy.permission.PermissionCheckerImpl
@@ -53,12 +54,27 @@ class CommandDispatcherTest {
         assertTrue(command.executed)
     }
 
+    @Test
+    fun blocksPlayerOnlyFromConsole() {
+        val registry = CommandRegistryImpl()
+        val dispatcher = CommandDispatcher(registry, PermissionCheckerImpl())
+        val sender = RecordingSender("console", SenderType.CONSOLE)
+        val command = TestCommand("ping", emptyList(), null, setOf(CommandFlag.PLAYER_ONLY))
+        registry.register(command)
+
+        assertTrue(dispatcher.dispatch(sender, "ping"))
+        assertEquals(listOf("Command is only available to players."), sender.messages)
+        assertFalse(command.executed)
+    }
+
     private class TestCommand(
         override val name: String,
         override val aliases: List<String>,
         override val permission: String?,
+        override val flags: Set<CommandFlag> = emptySet(),
     ) : Command {
         override val description: String = "test"
+        override val usage: String = "ping"
         var executed: Boolean = false
 
         override fun execute(context: CommandContext) {
@@ -70,10 +86,9 @@ class CommandDispatcherTest {
 
     private class RecordingSender(
         override val name: String,
+        override val type: SenderType = SenderType.PLAYER,
     ) : CommandSender {
         val messages = mutableListOf<String>()
-
-        override val type: SenderType = SenderType.PLAYER
 
         override fun sendMessage(message: String) {
             messages.add(message)

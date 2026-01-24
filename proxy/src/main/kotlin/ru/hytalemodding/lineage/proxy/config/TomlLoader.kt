@@ -56,12 +56,12 @@ object TomlLoader {
                 port = 25565
 
                 [limits]
-                max_language_length = 128
+                max_language_length = 16
                 max_identity_token_length = 8192
                 max_username_length = 16
                 max_referral_data_length = 4096
                 max_host_length = 256
-                max_connect_size = 38161
+                max_connect_size = 38013
 
                 [rate_limits]
                 connection_per_ip_max = 20
@@ -77,6 +77,12 @@ object TomlLoader {
                 enabled = false
                 host = "0.0.0.0"
                 port = 25570
+                control_sender_id = "proxy"
+                control_max_payload = 8192
+                control_replay_window_millis = 10000
+                control_replay_max_entries = 100000
+                control_max_skew_millis = 120000
+                control_ttl_millis = 10000
             """.trimIndent())
         }
     }
@@ -187,20 +193,64 @@ object TomlLoader {
     }
 
     private fun parseMessaging(table: TomlTable?): MessagingConfig {
-        val defaults = MessagingConfig(host = "0.0.0.0", port = 25570, enabled = false)
+        val defaults = MessagingConfig(
+            host = "0.0.0.0",
+            port = 25570,
+            enabled = false,
+            controlSenderId = "proxy",
+            controlMaxPayload = 8192,
+            controlReplayWindowMillis = 10_000,
+            controlReplayMaxEntries = 100_000,
+            controlMaxSkewMillis = 120_000,
+            controlTtlMillis = 10_000,
+        )
         if (table == null) {
             return defaults
         }
         val enabled = table.getBoolean("enabled") ?: defaults.enabled
         val host = table.getString("host") ?: defaults.host
         val port = table.getLong("port")?.toInt() ?: defaults.port
+        val controlSenderId = table.getString("control_sender_id") ?: defaults.controlSenderId
+        val controlMaxPayload = table.getLong("control_max_payload")?.toInt() ?: defaults.controlMaxPayload
+        val controlReplayWindowMillis = table.getLong("control_replay_window_millis") ?: defaults.controlReplayWindowMillis
+        val controlReplayMaxEntries = table.getLong("control_replay_max_entries")?.toInt() ?: defaults.controlReplayMaxEntries
+        val controlMaxSkewMillis = table.getLong("control_max_skew_millis") ?: defaults.controlMaxSkewMillis
+        val controlTtlMillis = table.getLong("control_ttl_millis") ?: defaults.controlTtlMillis
         if (host.isBlank()) {
             throw ConfigException("messaging.host must not be blank")
         }
         if (port !in 1..65535) {
             throw ConfigException("messaging.port must be between 1 and 65535")
         }
-        return MessagingConfig(host = host, port = port, enabled = enabled)
+        if (controlSenderId.isBlank()) {
+            throw ConfigException("messaging.control_sender_id must not be blank")
+        }
+        if (controlMaxPayload <= 0) {
+            throw ConfigException("messaging.control_max_payload must be > 0")
+        }
+        if (controlReplayWindowMillis <= 0) {
+            throw ConfigException("messaging.control_replay_window_millis must be > 0")
+        }
+        if (controlReplayMaxEntries <= 0) {
+            throw ConfigException("messaging.control_replay_max_entries must be > 0")
+        }
+        if (controlMaxSkewMillis < 0) {
+            throw ConfigException("messaging.control_max_skew_millis must be >= 0")
+        }
+        if (controlTtlMillis <= 0) {
+            throw ConfigException("messaging.control_ttl_millis must be > 0")
+        }
+        return MessagingConfig(
+            host = host,
+            port = port,
+            enabled = enabled,
+            controlSenderId = controlSenderId,
+            controlMaxPayload = controlMaxPayload,
+            controlReplayWindowMillis = controlReplayWindowMillis,
+            controlReplayMaxEntries = controlReplayMaxEntries,
+            controlMaxSkewMillis = controlMaxSkewMillis,
+            controlTtlMillis = controlTtlMillis,
+        )
     }
 
     private fun parseReferral(table: TomlTable?, listener: ListenerConfig, limits: ProtocolLimitsConfig): ReferralConfig {

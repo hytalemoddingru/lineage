@@ -41,6 +41,9 @@ class PlayerSession(
     @Volatile
     var clientCertB64: String? = null
 
+    @Volatile
+    var proxyCertB64: String? = null
+
     fun attachClient(channel: Channel) {
         clientChannel = channel
     }

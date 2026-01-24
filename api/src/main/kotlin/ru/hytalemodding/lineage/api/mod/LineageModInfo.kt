@@ -21,6 +21,7 @@ annotation class LineageModInfo(
     val description: String = "",
     val dependencies: Array<String> = [],
     val softDependencies: Array<String> = [],
+    val capabilities: Array<ModCapability> = [],
     val website: String = "",
     val license: String = "",
 )

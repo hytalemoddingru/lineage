@@ -1,0 +1,17 @@
+/*
+ * Lineage Proxy
+ * Copyright (c) 2026 Hytale Modding Russia
+ *
+ * Licensed under the GNU Affero General Public License v3.0
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+package ru.hytalemodding.lineage.shared.control
+
+import java.util.UUID
+
+data class TransferRequest(
+    val correlationId: UUID,
+    val playerId: UUID,
+    val targetBackendId: String,
+    val referralData: ByteArray,
+)

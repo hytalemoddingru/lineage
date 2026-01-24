@@ -12,15 +12,18 @@ import ru.hytalemodding.lineage.proxy.net.ProxyListener
 import ru.hytalemodding.lineage.proxy.console.ConsoleInputService
 import ru.hytalemodding.lineage.proxy.command.CommandDispatcher
 import ru.hytalemodding.lineage.proxy.command.CommandRegistryImpl
+import ru.hytalemodding.lineage.proxy.command.CommandRegistrySyncService
 import ru.hytalemodding.lineage.proxy.command.ConsoleCommandSender
 import ru.hytalemodding.lineage.proxy.command.ModCommand
 import ru.hytalemodding.lineage.proxy.command.PlayerCommandGateway
 import ru.hytalemodding.lineage.proxy.command.PermissionCommand
+import ru.hytalemodding.lineage.proxy.command.TransferCommand
 import ru.hytalemodding.lineage.proxy.permission.PermissionCheckerImpl
 import ru.hytalemodding.lineage.proxy.permission.PermissionStore
 import ru.hytalemodding.lineage.api.routing.RoutingStrategy
 import ru.hytalemodding.lineage.proxy.routing.StaticRoutingStrategy
 import ru.hytalemodding.lineage.proxy.routing.StrategyRouter
+import ru.hytalemodding.lineage.proxy.routing.EventRouter
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
 import ru.hytalemodding.lineage.proxy.security.RateLimitService
@@ -34,11 +37,15 @@ import ru.hytalemodding.lineage.proxy.mod.ModContextFactory
 import ru.hytalemodding.lineage.proxy.mod.ModManager
 import ru.hytalemodding.lineage.proxy.backend.BackendRegistryImpl
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
+import ru.hytalemodding.lineage.proxy.player.PlayerTransferService
+import ru.hytalemodding.lineage.proxy.control.ControlPlaneService
 import ru.hytalemodding.lineage.proxy.schedule.SchedulerImpl
 import ru.hytalemodding.lineage.proxy.service.ServiceRegistryImpl
+import ru.hytalemodding.lineage.proxy.security.TransferTokenIssuer
 import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Proxy entry point. Loads configuration and starts the Netty listener.
@@ -68,22 +75,16 @@ fun main(args: Array<String>) {
     val serviceRegistry = ServiceRegistryImpl()
     val routingStrategy = StaticRoutingStrategy(config)
     serviceRegistry.register(RoutingStrategy.SERVICE_KEY, routingStrategy)
-    val router = StrategyRouter(config, serviceRegistry, routingStrategy)
+    val baseRouter = StrategyRouter(config, serviceRegistry, routingStrategy)
+    val router = EventRouter(baseRouter, eventBus)
     val scheduler = SchedulerImpl()
-    val players = PlayerManagerImpl()
+    val transferServiceRef = AtomicReference<PlayerTransferService?>(null)
+    val players = PlayerManagerImpl { transferServiceRef.get() }
     val backends = BackendRegistryImpl(config)
     val modsDir = (configPath.parent ?: Path.of(".")).resolve("mods")
     var messaging: ru.hytalemodding.lineage.api.messaging.Messaging = NoopMessaging()
-    val listener = ProxyListener(
-        config,
-        router,
-        sessionManager,
-        tokenService,
-        transferTokenValidator,
-        rateLimitService,
-        players,
-        eventBus,
-    )
+    var controlPlane: ControlPlaneService? = null
+    var commandSync: CommandRegistrySyncService? = null
 
     logger.info("Starting Lineage proxy with config {}", configPath.toAbsolutePath())
     if (config.messaging.enabled) {
@@ -96,8 +97,24 @@ fun main(args: Array<String>) {
         impl.start()
         messagingServer = server
         messaging = impl
+        controlPlane = ControlPlaneService(messaging, config.messaging, eventBus, players)
+        commandSync = CommandRegistrySyncService(commandRegistry, messaging)
         logger.info("Messaging UDP enabled on {}:{}", config.messaging.host, config.messaging.port)
     }
+    val transferTokenIssuer = TransferTokenIssuer(secret)
+    val transferService = PlayerTransferService(eventBus, controlPlane, transferTokenIssuer)
+    transferServiceRef.set(transferService)
+    val liveListener = ProxyListener(
+        config,
+        router,
+        sessionManager,
+        tokenService,
+        transferTokenValidator,
+        rateLimitService,
+        players,
+        eventBus,
+        transferService,
+    )
     PlayerCommandGateway(messaging, dispatcher, players)
     val contextFactory = ModContextFactory(
         modsDirectory = modsDir,
@@ -113,9 +130,11 @@ fun main(args: Array<String>) {
     val modManager = ModManager(modsDir, contextFactory::create)
     commandRegistry.register(ModCommand(modManager))
     commandRegistry.register(PermissionCommand(permissionChecker, players, permissionStore))
+    commandRegistry.register(TransferCommand(players, transferService))
     modManager.loadAll()
     modManager.enableAll()
-    val channel = listener.start()
+    commandSync?.sendSnapshot()
+    val channel = liveListener.start()
     consoleInput.start()
 
     channel.closeFuture().syncUninterruptibly()
@@ -123,5 +142,5 @@ fun main(args: Array<String>) {
     modManager.unloadAll()
     scheduler.shutdown()
     messagingServer?.close()
-    listener.close()
+    liveListener.close()
 }

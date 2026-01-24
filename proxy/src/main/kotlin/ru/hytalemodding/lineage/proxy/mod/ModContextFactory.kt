@@ -42,19 +42,21 @@ class ModContextFactory(
         Files.createDirectories(dataDirectory)
         val logger = LoggerFactory.getLogger("lineage.mod.${modInfo.id}")
         val configManager: ConfigManager = ConfigManagerImpl(dataDirectory)
+        val guard = ModCapabilityGuard(modInfo)
         return ModContextImpl(
             modInfo = modInfo,
+            capabilities = modInfo.capabilities,
             logger = logger,
             dataDirectory = dataDirectory,
             configManager = configManager,
-            eventBus = eventBus,
-            commandRegistry = commandRegistry,
-            scheduler = scheduler,
-            messaging = messaging,
-            players = players,
-            backends = backends,
-            permissionChecker = permissionChecker,
-            serviceRegistry = serviceRegistry,
+            eventBus = GuardedEventBus(eventBus, guard),
+            commandRegistry = GuardedCommandRegistry(commandRegistry, guard),
+            scheduler = GuardedScheduler(scheduler, guard),
+            messaging = GuardedMessaging(messaging, guard),
+            players = GuardedPlayerManager(players, guard),
+            backends = GuardedBackendRegistry(backends, guard),
+            permissionChecker = GuardedPermissionChecker(permissionChecker, guard),
+            serviceRegistry = GuardedServiceRegistry(serviceRegistry, guard),
         )
     }
 }

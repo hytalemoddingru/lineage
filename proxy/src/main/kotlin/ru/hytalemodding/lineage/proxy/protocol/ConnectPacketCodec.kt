@@ -13,17 +13,20 @@ import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import kotlin.math.min
 
 private const val VARIABLE_BLOCK_START = ProtocolLimits.CONNECT_VARIABLE_BLOCK_START
-private const val PROTOCOL_HASH_LENGTH = ProtocolLimits.PROTOCOL_HASH_LENGTH
+private const val CLIENT_VERSION_LENGTH = ProtocolLimits.CLIENT_VERSION_LENGTH
 
 /**
  * Parsed Connect packet payload from the Hytale protocol.
  */
 data class ConnectPacket(
-    val protocolHash: String,
+    val protocolCrc: Int,
+    val protocolBuildNumber: Int,
+    val clientVersion: String,
     val clientType: Byte,
-    val language: String?,
+    val language: String,
     val identityToken: String?,
     val uuid: UUID,
     val username: String,
@@ -52,73 +55,81 @@ object ConnectPacketCodec {
         require(totalSize >= VARIABLE_BLOCK_START) {
             "Connect payload too small: $totalSize"
         }
-        require(totalSize <= limits.maxConnectSize) {
+        val maxConnectSize = min(limits.maxConnectSize, ProtocolLimits.CONNECT_MAX_SIZE)
+        require(totalSize <= maxConnectSize) {
             "Connect payload too large: $totalSize"
         }
         val nullBits = payload.getByte(base)
-        val protocolHash = readFixedAsciiString(payload, base + 1, PROTOCOL_HASH_LENGTH)
-        val clientType = payload.getByte(base + 65)
-        val uuid = readUuid(payload, base + 66)
+        val protocolCrc = payload.getIntLE(base + 1)
+        val protocolBuildNumber = payload.getIntLE(base + 5)
+        val clientVersion = readFixedAsciiString(payload, base + 9, CLIENT_VERSION_LENGTH)
+        val clientType = payload.getByte(base + 29)
+        val uuid = readUuid(payload, base + 30)
 
-        val languageOffset = payload.getIntLE(base + 82)
-        val identityOffset = payload.getIntLE(base + 86)
-        val usernameOffset = payload.getIntLE(base + 90)
-        val referralDataOffset = payload.getIntLE(base + 94)
-        val referralSourceOffset = payload.getIntLE(base + 98)
+        val usernameOffset = payload.getIntLE(base + 46)
+        val identityOffset = payload.getIntLE(base + 50)
+        val languageOffset = payload.getIntLE(base + 54)
+        val referralDataOffset = payload.getIntLE(base + 58)
+        val referralSourceOffset = payload.getIntLE(base + 62)
         val varBlockStart = base + VARIABLE_BLOCK_START
 
-        val language = if (nullBits.toInt() and 1 != 0) {
-            requireOffset(languageOffset, "Language")
-            readVarString(
-                payload,
-                varBlockStart + languageOffset,
-                limits.maxLanguageLength,
-                StandardCharsets.US_ASCII,
-                "Language",
-                limit,
-            )
-        } else null
-        val identityToken = if (nullBits.toInt() and 2 != 0) {
+        requireOffset(usernameOffset, "Username")
+        val maxUsername = min(limits.maxUsernameLength, ProtocolLimits.MAX_USERNAME_LENGTH)
+        val username = readVarString(
+            payload,
+            varBlockStart + usernameOffset,
+            maxUsername,
+            StandardCharsets.US_ASCII,
+            "Username",
+            limit,
+        )
+        val identityToken = if (nullBits.toInt() and 1 != 0) {
+            val maxIdentity = min(limits.maxIdentityTokenLength, ProtocolLimits.MAX_IDENTITY_TOKEN_LENGTH)
             requireOffset(identityOffset, "IdentityToken")
             readVarString(
                 payload,
                 varBlockStart + identityOffset,
-                limits.maxIdentityTokenLength,
+                maxIdentity,
                 StandardCharsets.UTF_8,
                 "IdentityToken",
                 limit,
             )
         } else null
-        requireOffset(usernameOffset, "Username")
-        val username = readVarString(
+        requireOffset(languageOffset, "Language")
+        val maxLanguage = min(limits.maxLanguageLength, ProtocolLimits.MAX_LANGUAGE_LENGTH)
+        val language = readVarString(
             payload,
-            varBlockStart + usernameOffset,
-            limits.maxUsernameLength,
+            varBlockStart + languageOffset,
+            maxLanguage,
             StandardCharsets.US_ASCII,
-            "Username",
+            "Language",
             limit,
         )
-        val referralData = if (nullBits.toInt() and 4 != 0) {
+        val referralData = if (nullBits.toInt() and 2 != 0) {
+            val maxReferral = min(limits.maxReferralDataLength, ProtocolLimits.MAX_REFERRAL_DATA_LENGTH)
             requireOffset(referralDataOffset, "ReferralData")
             readVarBytes(
                 payload,
                 varBlockStart + referralDataOffset,
-                limits.maxReferralDataLength,
+                maxReferral,
                 "ReferralData",
                 limit,
             )
         } else null
-        if (nullBits.toInt() and 8 != 0) {
+        if (nullBits.toInt() and 4 != 0) {
             requireOffset(referralSourceOffset, "ReferralSource")
             val referralPos = varBlockStart + referralSourceOffset
-            require(HostAddress.validateStructure(payload, referralPos, limit, limits.maxHostLength)) {
+            val maxHost = min(limits.maxHostLength, ProtocolLimits.MAX_HOST_LENGTH)
+            require(HostAddress.validateStructure(payload, referralPos, limit, maxHost)) {
                 "Invalid ReferralSource structure"
             }
         }
         val referralSource = null
 
         return ConnectPacket(
-            protocolHash = protocolHash,
+            protocolCrc = protocolCrc,
+            protocolBuildNumber = protocolBuildNumber,
+            clientVersion = clientVersion,
             clientType = clientType,
             language = language,
             identityToken = identityToken,
@@ -133,14 +144,19 @@ object ConnectPacketCodec {
      * Encodes a [packet] into [out].
      */
     fun encode(packet: ConnectPacket, out: ByteBuf) {
+        require(packet.referralData == null || packet.referralSource != null) {
+            "ReferralData requires ReferralSource"
+        }
         var nullBits = 0
-        if (packet.language != null) nullBits = nullBits or 1
-        if (packet.identityToken != null) nullBits = nullBits or 2
-        if (packet.referralData != null) nullBits = nullBits or 4
-        if (packet.referralSource != null) nullBits = nullBits or 8
+        if (packet.identityToken != null) nullBits = nullBits or 1
+        if (packet.referralData != null) nullBits = nullBits or 2
+        if (packet.referralSource != null) nullBits = nullBits or 4
 
         out.writeByte(nullBits)
-        writeFixedAsciiString(out, packet.protocolHash, PROTOCOL_HASH_LENGTH)
+        out.writeIntLE(packet.protocolCrc)
+        out.writeIntLE(packet.protocolBuildNumber)
+        requireByteLength(packet.clientVersion, StandardCharsets.US_ASCII, CLIENT_VERSION_LENGTH, "ClientVersion")
+        writeFixedAsciiString(out, packet.clientVersion, CLIENT_VERSION_LENGTH)
         out.writeByte(packet.clientType.toInt())
         writeUuid(out, packet.uuid)
 
@@ -152,11 +168,9 @@ object ConnectPacketCodec {
 
         val varBlockStart = out.writerIndex()
 
-        if (packet.language != null) {
-            requireByteLength(packet.language, StandardCharsets.US_ASCII, ProtocolLimits.MAX_LANGUAGE_LENGTH, "Language")
-            out.setIntLE(slots[0], out.writerIndex() - varBlockStart)
-            writeVarString(out, packet.language, StandardCharsets.US_ASCII)
-        } else out.setIntLE(slots[0], -1)
+        requireByteLength(packet.username, StandardCharsets.US_ASCII, ProtocolLimits.MAX_USERNAME_LENGTH, "Username")
+        out.setIntLE(slots[0], out.writerIndex() - varBlockStart)
+        writeVarString(out, packet.username, StandardCharsets.US_ASCII)
 
         if (packet.identityToken != null) {
             requireByteLength(packet.identityToken, StandardCharsets.UTF_8, ProtocolLimits.MAX_IDENTITY_TOKEN_LENGTH, "IdentityToken")
@@ -164,9 +178,9 @@ object ConnectPacketCodec {
             writeVarString(out, packet.identityToken, StandardCharsets.UTF_8)
         } else out.setIntLE(slots[1], -1)
 
-        requireByteLength(packet.username, StandardCharsets.US_ASCII, ProtocolLimits.MAX_USERNAME_LENGTH, "Username")
+        requireByteLength(packet.language, StandardCharsets.US_ASCII, ProtocolLimits.MAX_LANGUAGE_LENGTH, "Language")
         out.setIntLE(slots[2], out.writerIndex() - varBlockStart)
-        writeVarString(out, packet.username, StandardCharsets.US_ASCII)
+        writeVarString(out, packet.language, StandardCharsets.US_ASCII)
 
         if (packet.referralData != null) {
             require(packet.referralData.size <= ProtocolLimits.MAX_REFERRAL_DATA_LENGTH) {

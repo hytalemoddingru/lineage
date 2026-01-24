@@ -9,6 +9,7 @@ package ru.hytalemodding.lineage.proxy.command
 
 import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
+import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.api.permission.PermissionSubject
 import ru.hytalemodding.lineage.api.player.PlayerManager
@@ -26,7 +27,9 @@ class PermissionCommand(
     override val name: String = "perm"
     override val aliases: List<String> = listOf("permission")
     override val description: String = "Manage proxy permissions"
+    override val usage: String = "perm grant <player> <permission> | perm revoke <player> <permission> | perm clear <player> | perm list [player]"
     override val permission: String? = "lineage.command.perm"
+    override val flags: Set<CommandFlag> = emptySet()
 
     override fun execute(context: CommandContext) {
         val args = context.args
@@ -118,6 +121,6 @@ class PermissionCommand(
     }
 
     private fun sendUsage(sender: CommandSender) {
-        sender.sendMessage("Usage: perm grant|revoke <player> <permission> | perm clear|list <player>")
+        sender.sendMessage("Usage: $usage")
     }
 }

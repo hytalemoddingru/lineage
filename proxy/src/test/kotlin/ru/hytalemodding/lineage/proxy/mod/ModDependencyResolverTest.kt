@@ -66,6 +66,7 @@ class ModDependencyResolverTest {
             description = "",
             dependencies = dependencies,
             softDependencies = softDependencies,
+            capabilities = emptySet(),
             website = null,
             license = null,
         )
