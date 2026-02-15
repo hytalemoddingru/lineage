@@ -12,7 +12,7 @@ Kotlin:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.3.0",
+    apiVersion = "0.4.0",
     authors = ["YourName"]
 )
 class HelloMod : LineageMod() {
@@ -29,7 +29,7 @@ Java:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.3.0",
+    apiVersion = "0.4.0",
     authors = {"YourName"}
 )
 public final class HelloMod extends LineageMod {
@@ -51,7 +51,7 @@ Kotlin:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.3.0",
+    apiVersion = "0.4.0",
     capabilities = [ModCapability.MESSAGING, ModCapability.PLAYERS]
 )
 class HelloMod : LineageMod()
@@ -64,7 +64,7 @@ Java:
     id = "hello",
     name = "Hello Mod",
     version = "1.0.0",
-    apiVersion = "0.3.0",
+    apiVersion = "0.4.0",
     capabilities = {ModCapability.MESSAGING, ModCapability.PLAYERS}
 )
 public final class HelloMod extends LineageMod {
@@ -85,7 +85,7 @@ Gradle Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("ru.hytalemodding.lineage:api:0.3.0")
+    implementation("ru.hytalemodding.lineage:api:0.4.0")
 }
 ```
 
@@ -93,7 +93,7 @@ Gradle Groovy DSL:
 
 ```groovy
 dependencies {
-    implementation "ru.hytalemodding.lineage:api:0.3.0"
+    implementation "ru.hytalemodding.lineage:api:0.4.0"
 }
 ```
 
@@ -103,7 +103,7 @@ Maven:
 <dependency>
   <groupId>ru.hytalemodding.lineage</groupId>
   <artifactId>api</artifactId>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 

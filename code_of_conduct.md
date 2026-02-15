@@ -39,10 +39,18 @@ threatening, offensive, or harmful.
 This Code of Conduct applies within all project spaces, and also applies when an individual is
 officially representing the project in public spaces.
 
+Project spaces include:
+
+- GitHub repositories and pull requests
+- Discord community server
+- Telegram community channel
+- Reddit community space
+
 ## Enforcement
 
 To report unacceptable behavior, contact the maintainers via GitHub (for example, mention
-or message @amanomasato). All complaints will be reviewed and investigated promptly and fairly.
+or message @amanomasato), or contact maintainers through the official Discord server.
+All complaints will be reviewed and investigated promptly and fairly.
 
 ## Enforcement guidelines
 

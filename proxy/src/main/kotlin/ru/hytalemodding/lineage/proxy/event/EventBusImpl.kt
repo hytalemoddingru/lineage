@@ -11,6 +11,7 @@ import ru.hytalemodding.lineage.api.event.Cancellable
 import ru.hytalemodding.lineage.api.event.Event
 import ru.hytalemodding.lineage.api.event.EventBus
 import ru.hytalemodding.lineage.api.event.EventPriority
+import ru.hytalemodding.lineage.proxy.util.Logging
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -18,6 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Thread-safe event bus implementation.
  */
 class EventBusImpl : EventBus {
+    private val logger = Logging.logger(EventBusImpl::class.java)
     private val handlers = ConcurrentHashMap<Class<out Event>, CopyOnWriteArrayList<ListenerMethod>>()
     private val listenerIndex = ConcurrentHashMap<Any, List<ListenerMethod>>()
 
@@ -52,7 +54,17 @@ class EventBusImpl : EventBus {
             if (cancellable != null && cancellable.isCancelled && !handler.ignoreCancelled) {
                 continue
             }
-            handler.method.invoke(handler.listener, event)
+            try {
+                handler.method.invoke(handler.listener, event)
+            } catch (ex: Exception) {
+                logger.warn(
+                    "Event handler failed: event={}, listener={}, method={}",
+                    eventType.simpleName,
+                    handler.listener.javaClass.name,
+                    handler.method.name,
+                    ex,
+                )
+            }
         }
     }
 

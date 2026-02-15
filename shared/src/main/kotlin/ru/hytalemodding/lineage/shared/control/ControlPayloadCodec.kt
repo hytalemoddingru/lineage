@@ -29,6 +29,8 @@ object ControlPayloadCodec {
     private const val TOKEN_REASON_UNSUPPORTED_VERSION: Byte = 5
     private const val TOKEN_REASON_TARGET_MISMATCH: Byte = 6
     private const val TOKEN_REASON_REPLAYED: Byte = 7
+    private const val BACKEND_ONLINE: Byte = 1
+    private const val BACKEND_OFFLINE: Byte = 2
 
     fun encodeTransferRequest(request: TransferRequest): ByteArray {
         val backendBytes = request.targetBackendId.toByteArray(StandardCharsets.UTF_8)
@@ -100,6 +102,32 @@ object ControlPayloadCodec {
             return null
         }
         return TokenValidationNotice(playerId, backendId, result, reason)
+    }
+
+    fun encodeBackendStatusNotice(notice: BackendStatusNotice): ByteArray {
+        val backendBytes = notice.backendId.toByteArray(StandardCharsets.UTF_8)
+        val buffer = ByteBuffer.allocate(4 + backendBytes.size + 1)
+        writeBytes(buffer, backendBytes)
+        buffer.put(if (notice.online) BACKEND_ONLINE else BACKEND_OFFLINE)
+        return buffer.array()
+    }
+
+    fun decodeBackendStatusNotice(payload: ByteArray): BackendStatusNotice? {
+        val buffer = ByteBuffer.wrap(payload)
+        val backendBytes = readBytes(buffer) ?: return null
+        if (buffer.remaining() != 1) {
+            return null
+        }
+        val online = when (buffer.get()) {
+            BACKEND_ONLINE -> true
+            BACKEND_OFFLINE -> false
+            else -> return null
+        }
+        val backendId = backendBytes.toString(StandardCharsets.UTF_8)
+        if (backendId.isBlank()) {
+            return null
+        }
+        return BackendStatusNotice(backendId, online)
     }
 
     private fun writeUuid(buffer: ByteBuffer, uuid: UUID) {

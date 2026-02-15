@@ -9,15 +9,21 @@ package ru.hytalemodding.lineage.proxy.command
 
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.api.command.SenderType
+import ru.hytalemodding.lineage.proxy.console.ConsoleAnsiFormatter
+import ru.hytalemodding.lineage.proxy.console.ConsoleInputService
+import ru.hytalemodding.lineage.proxy.text.RenderLimits
 
 /**
  * Console sender implementation.
  */
-class ConsoleCommandSender : CommandSender {
+class ConsoleCommandSender(
+    private val renderLimitsProvider: () -> RenderLimits = { RenderLimits() },
+) : CommandSender {
     override val name: String = "console"
     override val type: SenderType = SenderType.CONSOLE
 
     override fun sendMessage(message: String) {
-        println(message)
+        val rendered = ConsoleAnsiFormatter.render(message, renderLimitsProvider())
+        ConsoleInputService.printOutput("$rendered\n")
     }
 }

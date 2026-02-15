@@ -71,4 +71,20 @@ class ControlPayloadCodecTest {
         assertEquals(notice.result, decoded.result)
         assertEquals(notice.reason, decoded.reason)
     }
+
+    @Test
+    fun backendStatusRoundTrip() {
+        val notice = BackendStatusNotice(
+            backendId = "survival",
+            online = false,
+        )
+
+        val encoded = ControlPayloadCodec.encodeBackendStatusNotice(notice)
+        val decoded = ControlPayloadCodec.decodeBackendStatusNotice(encoded)
+
+        assertNotNull(decoded)
+        decoded!!
+        assertEquals(notice.backendId, decoded.backendId)
+        assertEquals(notice.online, decoded.online)
+    }
 }

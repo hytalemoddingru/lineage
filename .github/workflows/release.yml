@@ -11,8 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      HYTALE_SERVER_JAR_URL: ${{ secrets.HYTALE_SERVER_JAR_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,16 +24,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.14.3
-      - name: Download HytaleServer.jar
-        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
-        run: |
-          mkdir -p libs
-          curl -fSL "$HYTALE_SERVER_JAR_URL" -o libs/HytaleServer.jar
       - name: Build release jars
-        run: gradle :proxy:shadowJar :agent:shadowJar
-      - name: Build backend-mod (requires HytaleServer.jar)
-        if: ${{ env.HYTALE_SERVER_JAR_URL != '' }}
-        run: gradle :backend-mod:shadowJar
+        run: gradle :proxy:shadowJar :backend-mod:shadowJar
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -43,4 +33,3 @@ jobs:
           files: |
             proxy/build/libs/lineage-proxy-*.jar
             backend-mod/build/libs/lineage-backend-mod-*.jar
-            agent/build/libs/lineage-agent-*.jar

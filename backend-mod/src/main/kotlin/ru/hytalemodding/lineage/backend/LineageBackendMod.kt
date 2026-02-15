@@ -10,6 +10,7 @@ package ru.hytalemodding.lineage.backend
 import com.hypixel.hytale.protocol.HostAddress
 import com.hypixel.hytale.protocol.packets.connection.Connect
 import com.hypixel.hytale.server.core.event.events.player.PlayerSetupConnectEvent
+import com.hypixel.hytale.server.core.event.events.ShutdownEvent
 import com.hypixel.hytale.server.core.auth.ServerAuthManager
 import com.hypixel.hytale.server.core.io.PacketHandler
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters
@@ -17,47 +18,59 @@ import com.hypixel.hytale.server.core.io.adapter.PacketFilter
 import com.hypixel.hytale.server.core.io.transport.QUICTransport
 import com.hypixel.hytale.server.core.plugin.JavaPlugin
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit
-import com.hypixel.hytale.server.core.Message
 import com.hypixel.hytale.server.core.universe.Universe
 import com.hypixel.hytale.server.core.Options
 import org.slf4j.LoggerFactory
+import ru.hytalemodding.lineage.backend.auth.AuthModePolicy
 import ru.hytalemodding.lineage.backend.command.ProxyCommandBridge
 import ru.hytalemodding.lineage.backend.config.BackendConfigLoader
 import ru.hytalemodding.lineage.backend.control.BackendControlPlaneService
 import ru.hytalemodding.lineage.backend.handshake.HandshakeInterceptor
 import ru.hytalemodding.lineage.backend.messaging.BackendMessaging
+import ru.hytalemodding.lineage.backend.message.LegacyColorMessageRenderer
 import ru.hytalemodding.lineage.backend.security.ReplayProtector
 import ru.hytalemodding.lineage.backend.security.TokenValidator
 import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
+import ru.hytalemodding.lineage.shared.control.ControlMessageType
+import ru.hytalemodding.lineage.shared.control.ControlProtocol
+import ru.hytalemodding.lineage.shared.control.ControlReplayProtector
 import ru.hytalemodding.lineage.shared.control.TokenValidationReason
 import ru.hytalemodding.lineage.shared.control.TokenValidationResult
+import ru.hytalemodding.lineage.shared.logging.StructuredLog
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.net.InetSocketAddress
-import java.security.MessageDigest
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Backend mod that validates proxy referral tokens and exposes the fingerprint to the server.
  */
 class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
+    companion object {
+        private const val SHUTDOWN_REROUTE_PRIORITY_OFFSET = 64
+        private const val SHUTDOWN_REROUTE_GRACE_MILLIS = 1_200L
+        private const val SHUTDOWN_REFERRAL_ATTEMPTS = 3
+        private const val SHUTDOWN_REFERRAL_INTERVAL_MILLIS = 40L
+    }
+
     private val logger = LoggerFactory.getLogger(LineageBackendMod::class.java)
     private lateinit var interceptor: HandshakeInterceptor
     private lateinit var config: ru.hytalemodding.lineage.backend.config.BackendConfig
     private val handshakeStates = ConcurrentHashMap<String, ProxyHandshakeState>()
     private var authModeAuthenticated = true
     private var authModeLabel = "unknown"
-    private var enforceProxy = true
-    private var useJavaAgentFallback = false
+    private lateinit var commandReplayProtector: ControlReplayProtector
     private var commandBridgeEnabled = false
     private var commandBridge: ProxyCommandBridge? = null
     private var controlPlane: BackendControlPlaneService? = null
+    private val shutdownRerouteTriggered = AtomicBoolean(false)
 
     override fun start() {
         super.start()
@@ -67,6 +80,10 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
             val configPath = dataDirectory.resolve("config.toml")
             val bootstrap = BackendConfigLoader.ensureConfig(configPath, "server-1")
             config = bootstrap.config
+            commandReplayProtector = ControlReplayProtector(
+                config.controlReplayWindowMillis,
+                config.controlReplayMaxEntries,
+            )
 
             val secrets = mutableListOf<ByteArray>()
             secrets.add(config.proxySecret.toByteArray(StandardCharsets.UTF_8))
@@ -81,13 +98,13 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
             )
             interceptor = HandshakeInterceptor(validator, config.serverId, replayProtector)
             resolveAuthMode()
-            resolveSecurityMode()
             registerHandshakeBridge()
 
             eventRegistry.register(PlayerSetupConnectEvent::class.java, this::onPlayerConnect)
-            if (!config.agentless && !config.enforceProxy) {
-                logger.warn("Proxy enforcement disabled. Players can connect directly to this server.")
-            }
+            eventRegistry.register(
+                (ShutdownEvent.DISCONNECT_PLAYERS - SHUTDOWN_REROUTE_PRIORITY_OFFSET).toShort(),
+                ShutdownEvent::class.java,
+            ) { handleShutdownDisconnectPlayers(it) }
 
             if (!authModeAuthenticated) {
                 if (config.requireAuthenticatedMode) {
@@ -104,11 +121,11 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
                 val address = InetSocketAddress(config.messagingHost, config.messagingPort)
                 BackendMessaging.start(address, secrets.first())
                 BackendMessaging.registerChannel(PlayerCommandProtocol.RESPONSE_CHANNEL_ID, this::onCommandResponse)
+                BackendMessaging.registerChannel(PlayerCommandProtocol.SYSTEM_RESPONSE_CHANNEL_ID, this::onSystemResponse)
                 controlPlane = BackendControlPlaneService(config).also { it.start() }
                 commandBridgeEnabled = true
                 commandBridge = ProxyCommandBridge(this, { commandBridgeEnabled }).also {
                     it.start()
-                    it.requestSync()
                 }
                 logger.info("Backend messaging connected to {}:{}", config.messagingHost, config.messagingPort)
             }
@@ -121,19 +138,70 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
     }
 
     override fun shutdown() {
+        referPlayersToProxyOnShutdown()
         commandBridge?.stop()
         controlPlane?.stop()
         BackendMessaging.stop()
         super.shutdown()
     }
 
+    private fun handleShutdownDisconnectPlayers(@Suppress("UNUSED_PARAMETER") event: ShutdownEvent?) {
+        logger.info("Shutdown phase before player disconnect: rerouting players to proxy")
+        controlPlane?.announceOffline()
+        val reroutedPlayers = referPlayersToProxyOnShutdown()
+        if (reroutedPlayers > 0) {
+            runCatching { Thread.sleep(SHUTDOWN_REROUTE_GRACE_MILLIS) }
+        }
+    }
+
+    private fun referPlayersToProxyOnShutdown(): Int {
+        if (!shutdownRerouteTriggered.compareAndSet(false, true)) {
+            return 0
+        }
+        if (!::config.isInitialized) {
+            return 0
+        }
+        val players = runCatching { Universe.get().players }.getOrNull() ?: return 0
+        if (players.isEmpty()) {
+            return 0
+        }
+        logger.info("Rerouting {} player(s) to proxy before backend shutdown", players.size)
+        val emptyReferral = ByteArray(0)
+        players.forEach { player ->
+            runCatching {
+                repeat(SHUTDOWN_REFERRAL_ATTEMPTS) { attempt ->
+                    player.referToServer(config.proxyConnectHost, config.proxyConnectPort, emptyReferral)
+                    player.packetHandler.tryFlush()
+                    if (attempt + 1 < SHUTDOWN_REFERRAL_ATTEMPTS) {
+                        Thread.sleep(SHUTDOWN_REFERRAL_INTERVAL_MILLIS)
+                    }
+                }
+            }.onFailure { error ->
+                logger.warn("Failed to reroute player {} during shutdown", player.uuid, error)
+            }
+        }
+        return players.size
+    }
+
     /**
      * Handles initial client connect and publishes proxy token validation.
      */
     private fun onPlayerConnect(event: PlayerSetupConnectEvent) {
-        if (!authModeAuthenticated && config.requireAuthenticatedMode) {
-            logger.warn("Rejecting {}: server auth-mode is {}", event.username, authModeLabel)
-            event.reason = "Server requires AUTHENTICATED mode."
+        if (AuthModePolicy.shouldRejectHandshake(config.requireAuthenticatedMode, authModeAuthenticated)) {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "handshake",
+                    severity = "WARN",
+                    reason = "AUTH_MODE_REJECT",
+                    correlationId = event.uuid.toString(),
+                    fields = mapOf(
+                        "username" to event.username,
+                        "authMode" to authModeLabel,
+                    ),
+                )
+            )
+            event.reason = AuthModePolicy.REQUIRED_AUTH_MESSAGE
             event.isCancelled = true
             controlPlane?.sendTokenValidationNotice(
                 event.uuid,
@@ -153,20 +221,28 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
                     interceptor.validateReferralData(event.referralData)
                 }
             }
-            val fingerprint = token.proxyCertB64?.let { resolveProxyFingerprint(it) }
-            if (useJavaAgentFallback && fingerprint != null) {
-                logger.info("Setting proxy fingerprint for {}: {}", event.username, fingerprint)
-                System.setProperty("lineage.proxy.fingerprint", fingerprint)
-            }
+            ensureCertificatesApplied(event.packetHandler, token)
             controlPlane?.sendTokenValidationNotice(
                 event.uuid,
                 config.serverId,
                 TokenValidationResult.ACCEPTED,
                 null,
             )
-
         } catch (e: TokenValidationException) {
-            logger.warn("Proxy token rejected for {}: {} ({})", event.username, e.error, e.message)
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "handshake",
+                    severity = "WARN",
+                    reason = "PROXY_TOKEN_REJECTED",
+                    correlationId = event.uuid.toString(),
+                    fields = mapOf(
+                        "username" to event.username,
+                        "validationError" to e.error.name,
+                        "details" to (e.message ?: "none"),
+                    ),
+                )
+            )
             controlPlane?.sendTokenValidationNotice(
                 event.uuid,
                 config.serverId,
@@ -175,7 +251,17 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
             )
             rejectIfEnforced(event)
         } catch (e: Exception) {
-            logger.error("Bypass error", e)
+            logger.error(
+                "{}",
+                StructuredLog.event(
+                    category = "handshake",
+                    severity = "ERROR",
+                    reason = "HANDSHAKE_BYPASS_ERROR",
+                    correlationId = event.uuid.toString(),
+                    fields = mapOf("username" to event.username, "errorType" to e.javaClass.simpleName),
+                ),
+                e,
+            )
             controlPlane?.sendTokenValidationNotice(
                 event.uuid,
                 config.serverId,
@@ -186,18 +272,21 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
         }
     }
 
-    private fun rejectIfEnforced(event: PlayerSetupConnectEvent) {
-        if (!enforceProxy) {
-            return
+    private fun ensureCertificatesApplied(packetHandler: PacketHandler, token: ProxyToken) {
+        if (!applyClientCertificate(packetHandler, token)) {
+            throw TokenValidationException(TokenValidationError.MALFORMED, "Missing client certificate")
         }
+        if (!applyServerCertificate(token)) {
+            throw TokenValidationException(TokenValidationError.MALFORMED, "Missing proxy certificate")
+        }
+    }
+
+    private fun rejectIfEnforced(event: PlayerSetupConnectEvent) {
         event.reason = "Proxy authentication failed."
         event.isCancelled = true
     }
 
     private fun validateReferralSource(event: PlayerSetupConnectEvent) {
-        if (!event.isReferralConnection) {
-            return
-        }
         validateReferralSource(event.referralSource)
     }
 
@@ -223,24 +312,88 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
         authModeAuthenticated = mode == Options.AuthMode.AUTHENTICATED
     }
 
-    private fun resolveSecurityMode() {
-        enforceProxy = config.enforceProxy || config.agentless
-        useJavaAgentFallback = !config.agentless && config.javaAgentFallback
-        if (config.agentless && config.javaAgentFallback) {
-            logger.warn("Agentless enabled: javaagent_fallback is ignored.")
-        }
-        if (config.agentless && !config.enforceProxy) {
-            logger.warn("Agentless enabled: enforce_proxy forced to true.")
-        }
-        if (config.javaAgentFallback) {
-            logger.warn("JavaAgent fallback enabled (legacy mode).")
-        }
+    private fun onCommandResponse(payload: ByteArray) {
+        val response = decodeValidatedResponse(payload, "COMMAND_RESPONSE") ?: return
+        val player = Universe.get().getPlayer(response.playerId) ?: return
+        player.sendMessage(LegacyColorMessageRenderer.render(response.message))
     }
 
-    private fun onCommandResponse(payload: ByteArray) {
-        val response = PlayerCommandProtocol.decodeResponse(payload) ?: return
+    private fun onSystemResponse(payload: ByteArray) {
+        val response = decodeValidatedResponse(payload, "SYSTEM_RESPONSE") ?: return
         val player = Universe.get().getPlayer(response.playerId) ?: return
-        player.sendMessage(Message.raw(response.message))
+        player.sendMessage(LegacyColorMessageRenderer.render(response.message))
+    }
+
+    private fun decodeValidatedResponse(
+        payload: ByteArray,
+        reasonPrefix: String,
+    ): ru.hytalemodding.lineage.shared.command.PlayerCommandResponse? {
+        val version = PlayerCommandProtocol.peekVersion(payload)
+        if (version == null) {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "control-plane",
+                    severity = "WARN",
+                    reason = "${reasonPrefix}_MALFORMED",
+                )
+            )
+            return null
+        }
+        if (!PlayerCommandProtocol.hasSupportedVersion(payload)) {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "control-plane",
+                    severity = "WARN",
+                    reason = "${reasonPrefix}_VERSION_MISMATCH",
+                    fields = mapOf("version" to version),
+                )
+            )
+            return null
+        }
+        val response = PlayerCommandProtocol.decodeResponse(payload) ?: run {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "control-plane",
+                    severity = "WARN",
+                    reason = "${reasonPrefix}_MALFORMED",
+                )
+            )
+            return null
+        }
+        if (!ControlProtocol.isTimestampValid(
+                response.issuedAtMillis,
+                response.ttlMillis,
+                System.currentTimeMillis(),
+                config.controlMaxSkewMillis,
+            )
+        ) {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "control-plane",
+                    severity = "WARN",
+                    reason = "${reasonPrefix}_INVALID_TIMESTAMP",
+                    correlationId = response.playerId.toString(),
+                )
+            )
+            return null
+        }
+        if (!commandReplayProtector.tryRegister("proxy", ControlMessageType.TRANSFER_RESULT, response.nonce)) {
+            logger.warn(
+                "{}",
+                StructuredLog.event(
+                    category = "control-plane",
+                    severity = "WARN",
+                    reason = "${reasonPrefix}_REPLAYED",
+                    correlationId = response.playerId.toString(),
+                )
+            )
+            return null
+        }
+        return response
     }
 
     private fun mapTokenReason(error: TokenValidationError): TokenValidationReason? {
@@ -312,14 +465,6 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
         return true
     }
 
-    private fun resolveProxyFingerprint(certB64: String): String? {
-        val cert = decodeClientCertificate(certB64)
-        if (cert == null) {
-            return certB64.takeIf { it.isNotBlank() }
-        }
-        return computeFingerprint(cert)
-    }
-
     private fun decodeClientCertificate(certB64: String): X509Certificate? {
         if (certB64.isBlank()) {
             return null
@@ -329,11 +474,6 @@ class LineageBackendMod(init: JavaPluginInit) : JavaPlugin(init) {
             CertificateFactory.getInstance("X.509")
                 .generateCertificate(ByteArrayInputStream(bytes)) as X509Certificate
         }.getOrNull()
-    }
-
-    private fun computeFingerprint(cert: X509Certificate): String? {
-        val hash = runCatching { MessageDigest.getInstance("SHA-256").digest(cert.encoded) }.getOrNull() ?: return null
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(hash)
     }
 
     private data class ProxyHandshakeState(

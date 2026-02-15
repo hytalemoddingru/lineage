@@ -17,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class PlayerManagerImpl : PlayerManager {
     private val transferServiceProvider: () -> PlayerTransferService?
+    @Volatile
+    private var messageSender: (ProxyPlayerImpl, String) -> Boolean = { _, _ -> false }
 
     constructor(transferServiceProvider: () -> PlayerTransferService?) {
         this.transferServiceProvider = transferServiceProvider
@@ -33,15 +35,21 @@ class PlayerManagerImpl : PlayerManager {
 
     override fun all(): Collection<ProxyPlayer> = players.values
 
-    fun getOrCreate(id: UUID, username: String): ProxyPlayerImpl {
+    fun getOrCreate(id: UUID, username: String, language: String = "en-US"): ProxyPlayerImpl {
         val existing = players[id]
         if (existing != null) {
             existing.username = username
+            existing.language = language
             return existing
         }
-        val created = ProxyPlayerImpl(id, username, transferServiceProvider)
+        val created = ProxyPlayerImpl(id, username, transferServiceProvider) { messageSender }
+        created.language = language
         players[id] = created
         return created
+    }
+
+    fun setMessageSender(sender: (ProxyPlayerImpl, String) -> Boolean) {
+        messageSender = sender
     }
 
     fun add(player: ProxyPlayerImpl) {

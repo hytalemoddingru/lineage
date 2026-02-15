@@ -12,6 +12,7 @@ import ru.hytalemodding.lineage.shared.token.CURRENT_TRANSFER_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.TransferToken
 import ru.hytalemodding.lineage.shared.token.TransferTokenCodec
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
@@ -90,6 +91,27 @@ class TransferTokenValidatorTest {
         val validator = TransferTokenValidator(secret, clock)
 
         assertNull(validator.tryValidate("v1.payload.signature", "player-1"))
+        assertFalse(validator.isTransferTokenCandidate("v1.payload.signature"))
+    }
+
+    @Test
+    fun rejectsReplayedTransferToken() {
+        val clock = FixedClock(1_500L)
+        val validator = TransferTokenValidator(secret, clock)
+        val token = TransferToken(
+            version = CURRENT_TRANSFER_TOKEN_VERSION,
+            playerId = "player-1",
+            targetServerId = "hub",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+        )
+        val encoded = TransferTokenCodec.encode(token, secret)
+
+        val first = validator.tryValidate(encoded, "player-1")
+        val second = validator.tryValidate(encoded, "player-1")
+
+        assertEquals("hub", first?.targetServerId)
+        assertNull(second)
     }
 
     private class FixedClock(private val now: Long) : Clock {

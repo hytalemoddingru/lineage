@@ -31,4 +31,4 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.OSSRH_GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.OSSRH_GPG_PASSPHRASE }}
-        run: gradle --no-configuration-cache publishToMavenCentral
+        run: ./gradlew --no-configuration-cache :api:publishAndReleaseToMavenCentral :shared:publishAndReleaseToMavenCentral

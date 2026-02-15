@@ -12,6 +12,7 @@ tomlj = "1.1.1"
 bouncycastle = "1.78.1"
 shadow = "8.3.6"
 asm = "9.7.1"
+jline = "3.27.1"
 
 [libraries]
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit" }
@@ -24,6 +25,7 @@ tomlj = { module = "org.tomlj:tomlj", version.ref = "tomlj" }
 bc-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 bc-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
+jline = { module = "org.jline:jline", version.ref = "jline" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

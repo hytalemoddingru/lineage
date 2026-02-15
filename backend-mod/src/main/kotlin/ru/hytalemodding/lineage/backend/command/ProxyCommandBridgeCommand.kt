@@ -13,7 +13,6 @@ import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase
 import com.hypixel.hytale.server.core.entity.entities.Player
 import ru.hytalemodding.lineage.backend.messaging.BackendMessaging
 import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
-import ru.hytalemodding.lineage.shared.command.ProxyCommandFlags
 
 class ProxyCommandBridgeCommand(
     name: String,
@@ -22,6 +21,7 @@ class ProxyCommandBridgeCommand(
     private val aliases: List<String>,
     private val flags: Int,
     private val isMessagingEnabled: () -> Boolean,
+    private val isRegistrySynchronized: () -> Boolean,
 ) : CommandBase(name, description) {
     init {
         setAllowsExtraArguments(true)
@@ -33,25 +33,19 @@ class ProxyCommandBridgeCommand(
     override fun canGeneratePermission(): Boolean = false
 
     override fun executeSync(context: CommandContext) {
-        if (!context.isPlayer) {
-            if (flags and ProxyCommandFlags.PLAYER_ONLY != 0) {
-                context.sendMessage(Message.raw("Command is only available to players."))
-                return
-            }
-            context.sendMessage(Message.raw("Command is only available to players."))
-            return
-        }
-        if (!isMessagingEnabled()) {
-            context.sendMessage(Message.raw("Proxy messaging is disabled."))
-            return
-        }
-        val input = context.inputString.trim()
-        if (input.isBlank()) {
-            context.sendMessage(Message.raw("Usage: $usage"))
+        val decision = ProxyCommandDispatchPolicy.evaluate(
+            isPlayerSender = context.isPlayer,
+            messagingEnabled = isMessagingEnabled(),
+            registrySynchronized = isRegistrySynchronized(),
+            rawInput = context.inputString,
+            usage = usage,
+        )
+        if (!decision.accepted) {
+            context.sendMessage(Message.raw(decision.message))
             return
         }
         val player = context.senderAs(Player::class.java)
-        val payload = PlayerCommandProtocol.encodeRequest(player.playerRef.uuid, input)
+        val payload = PlayerCommandProtocol.encodeRequest(player.playerRef.uuid, decision.normalizedInput!!)
         BackendMessaging.send(PlayerCommandProtocol.REQUEST_CHANNEL_ID, payload)
     }
 }

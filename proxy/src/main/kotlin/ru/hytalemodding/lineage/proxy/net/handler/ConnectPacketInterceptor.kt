@@ -11,6 +11,7 @@ import io.netty.buffer.ByteBuf
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInboundHandlerAdapter
+import io.netty.incubator.codec.quic.QuicChannel
 import io.netty.incubator.codec.quic.QuicStreamChannel
 import io.netty.util.ReferenceCountUtil
 import ru.hytalemodding.lineage.api.event.EventBus
@@ -29,9 +30,12 @@ import ru.hytalemodding.lineage.proxy.security.RateLimitService
 import ru.hytalemodding.lineage.proxy.security.TokenService
 import ru.hytalemodding.lineage.proxy.security.TransferTokenValidator
 import ru.hytalemodding.lineage.proxy.session.PlayerSession
+import ru.hytalemodding.lineage.proxy.net.BackendAvailabilityTracker
 import ru.hytalemodding.lineage.proxy.util.Logging
 import ru.hytalemodding.lineage.proxy.config.ReferralConfig
+import ru.hytalemodding.lineage.proxy.observability.ProxyMetricsRegistry
 import ru.hytalemodding.lineage.shared.protocol.ProtocolLimitsConfig
+import ru.hytalemodding.lineage.shared.logging.StructuredLog
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 
@@ -47,11 +51,17 @@ class ConnectPacketInterceptor(
     private val playerManager: PlayerManagerImpl,
     private val eventBus: EventBus,
     private val transferService: PlayerTransferService,
+    private val backendAvailabilityTracker: BackendAvailabilityTracker,
     private val referralConfig: ReferralConfig,
     private val protocolLimits: ProtocolLimitsConfig,
     private val remoteKey: String,
     private val clientAddress: InetSocketAddress?,
-    private val onBackendSelected: (String) -> Unit,
+    private val metrics: ProxyMetricsRegistry? = null,
+    private val onBackendSelected: (
+        backendId: String,
+        onResolved: (resolvedBackendId: String) -> Unit,
+        onFailure: (Throwable?) -> Unit,
+    ) -> Unit,
 ) : ChannelInboundHandlerAdapter() {
     private val logger = Logging.logger(ConnectPacketInterceptor::class.java)
     private var handled = false
@@ -61,6 +71,7 @@ class ConnectPacketInterceptor(
     private var cumulation: ByteBuf? = null
     private var ctxRef: ChannelHandlerContext? = null
     private var bridgeAttached = false
+    private var handshakeLease: ru.hytalemodding.lineage.proxy.security.InFlightLimiter.Lease? = null
 
     /**
      * Assigns the backend stream used for forwarding the modified Connect packet.
@@ -85,6 +96,24 @@ class ConnectPacketInterceptor(
             ctx.fireChannelRead(msg)
             return
         }
+        if (handshakeLease == null) {
+            val lease = rateLimitService.handshakeInFlight.tryAcquire()
+            if (lease == null) {
+                logger.warn(
+                    "{}",
+                    StructuredLog.event(
+                        category = "handshake",
+                        severity = "WARN",
+                        reason = "HANDSHAKE_INFLIGHT_LIMIT",
+                        correlationId = session.id.toString(),
+                        fields = mapOf("remoteKey" to remoteKey),
+                    )
+                )
+                recordInvalidAndClose(ctx, msg, "HANDSHAKE_INFLIGHT_LIMIT")
+                return
+            }
+            handshakeLease = lease
+        }
 
         try {
             var buf = cumulation
@@ -103,8 +132,7 @@ class ConnectPacketInterceptor(
             val base = buf.readerIndex()
             val payloadLength = buf.getIntLE(base)
             if (payloadLength <= 0 || payloadLength > protocolLimits.maxConnectSize) {
-                logger.warn("Invalid Connect payload length {} from {}", payloadLength, remoteKey)
-                recordInvalidAndClose(ctx, buf)
+                recordInvalidAndClose(ctx, buf, "INVALID_CONNECT_LENGTH")
                 return
             }
             val packetId = buf.getIntLE(base + 4)
@@ -122,20 +150,18 @@ class ConnectPacketInterceptor(
             }
 
             if (!rateLimitService.handshakePerIp.tryAcquire(remoteKey)) {
-                logger.warn("Handshake rate limit exceeded for {}", remoteKey)
-                recordInvalidAndClose(ctx, buf)
+                recordInvalidAndClose(ctx, buf, "HANDSHAKE_RATE_LIMIT")
                 return
             }
-            logger.info("Full Connect packet intercepted. Length: {}", payloadLength)
+            logger.debug("Full Connect packet intercepted. Length: {}", payloadLength)
             val payload = buf.slice(base + 8, payloadLength)
             val connect = try {
                 ConnectPacketCodec.decode(payload, protocolLimits)
             } catch (ex: IllegalArgumentException) {
-                logger.warn("Connect payload rejected: {}", ex.message)
-                recordInvalidAndClose(ctx, buf)
+                recordInvalidAndClose(ctx, buf, "CONNECT_PAYLOAD_REJECTED")
                 return
             }
-            logger.info(
+            logger.debug(
                 "Client {} ({}) protocol crc={}, build={}, version={}",
                 connect.username,
                 connect.uuid,
@@ -147,13 +173,23 @@ class ConnectPacketInterceptor(
             val backendId = try {
                 resolveBackend(connect)
             } catch (ex: RoutingDeniedException) {
-                logger.warn("Route denied for {} ({}): {}", connect.username, connect.uuid, ex.reason)
-                rejectAndClose(ctx, buf)
+                rejectAndClose(ctx, buf, "ROUTE_DENIED")
                 return
             }
             val isNewPlayer = playerManager.get(connect.uuid) == null
-            val player = playerManager.getOrCreate(connect.uuid, connect.username)
+            val player = playerManager.getOrCreate(connect.uuid, connect.username, connect.language)
+            player.bindConnectionMetadata(
+                sessionId = session.id,
+                clientChannel = session.clientChannel as? QuicChannel,
+                remoteAddress = clientAddress,
+                protocolCrc = connect.protocolCrc,
+                protocolBuildNumber = connect.protocolBuildNumber,
+                clientVersion = connect.clientVersion,
+                clientType = connect.clientType,
+                language = connect.language,
+            )
             if (isNewPlayer) {
+                logger.info("{} connected [{}]", connect.username, backendId)
                 eventBus.post(PlayerConnectEvent(player))
             }
             val previousBackend = player.backendId
@@ -163,64 +199,75 @@ class ConnectPacketInterceptor(
             } else {
                 transferService.transfer(player, backendId)
             }
-            val clientCertB64 = session.clientCertB64
-            if (clientCertB64.isNullOrBlank()) {
-                logger.warn("Missing client certificate for {} ({})", connect.username, connect.uuid)
-                recordInvalidAndClose(ctx, buf)
-                return
-            }
-            val proxyCertB64 = session.proxyCertB64
-            if (proxyCertB64.isNullOrBlank()) {
-                logger.warn("Missing proxy certificate for {} ({})", connect.username, connect.uuid)
-                recordInvalidAndClose(ctx, buf)
-                return
-            }
-            val token = tokenService.issueToken(connect.uuid.toString(), backendId, clientCertB64, proxyCertB64)
-            val tokenBytes = token.toByteArray(StandardCharsets.UTF_8)
-            if (tokenBytes.size > protocolLimits.maxReferralDataLength) {
-                logger.warn("Issued token exceeds referralData limit ({} > {})", tokenBytes.size, protocolLimits.maxReferralDataLength)
-                recordInvalidAndClose(ctx, buf)
-                return
-            }
-            val updated = connect.copy(
-                referralData = tokenBytes,
-                referralSource = HostAddress(referralConfig.host, referralConfig.port)
-            )
-
-            val modified = ctx.alloc().buffer()
-            val lengthIndex = modified.writerIndex()
-            modified.writeIntLE(0)
-            modified.writeIntLE(CONNECT_PACKET_ID)
-            ConnectPacketCodec.encode(updated, modified)
-            modified.setIntLE(lengthIndex, modified.writerIndex() - lengthIndex - 8)
-
             handled = true
+            releaseHandshakeLease()
             buf.skipBytes(8 + payloadLength)
-            
             val remaining = if (buf.isReadable) buf.readRetainedSlice(buf.readableBytes()) else null
             if (buf !== msg) buf.release()
             cumulation = null
-
-            val stream = backendStream
-            if (stream != null) {
-                logger.debug("Forwarding modified Connect packet immediately")
-                stream.writeAndFlush(modified)
-            } else {
-                logger.debug("Buffering modified Connect packet")
-                pendingPacket = modified
-            }
-            onBackendSelected(backendId)
             pendingRemainder = remaining
-            attachBridgeIfReady()
+
+            onBackendSelected(
+                backendId,
+                { resolvedBackendId ->
+                    val proxyCertB64 = session.proxyCertB64
+                    if (proxyCertB64.isNullOrBlank()) {
+                        rejectAndClose(ctx, ctx.alloc().buffer(0), "MISSING_PROXY_CERT")
+                        return@onBackendSelected
+                    }
+                    val clientCertB64 = session.clientCertB64?.takeIf { it.isNotBlank() } ?: proxyCertB64.also {
+                        logger.warn(
+                            "{}",
+                            StructuredLog.event(
+                                category = "handshake",
+                                severity = "WARN",
+                                reason = "MISSING_CLIENT_CERT_FALLBACK_PROXY_CERT",
+                                correlationId = session.id.toString(),
+                                fields = mapOf("remoteKey" to remoteKey),
+                            )
+                        )
+                    }
+                    val token = tokenService.issueToken(connect.uuid.toString(), resolvedBackendId, clientCertB64, proxyCertB64)
+                    val tokenBytes = token.toByteArray(StandardCharsets.UTF_8)
+                    if (tokenBytes.size > protocolLimits.maxReferralDataLength) {
+                        rejectAndClose(ctx, ctx.alloc().buffer(0), "REFERRAL_TOKEN_TOO_LARGE")
+                        return@onBackendSelected
+                    }
+                    val updated = connect.copy(
+                        referralData = tokenBytes,
+                        referralSource = HostAddress(referralConfig.host, referralConfig.port)
+                    )
+                    val modified = ctx.alloc().buffer()
+                    val lengthIndex = modified.writerIndex()
+                    modified.writeIntLE(0)
+                    modified.writeIntLE(CONNECT_PACKET_ID)
+                    ConnectPacketCodec.encode(updated, modified)
+                    modified.setIntLE(lengthIndex, modified.writerIndex() - lengthIndex - 8)
+
+                    session.selectedBackendId = resolvedBackendId
+                    val stream = backendStream
+                    if (stream != null) {
+                        logger.debug("Forwarding modified Connect packet immediately")
+                        stream.writeAndFlush(modified)
+                    } else {
+                        logger.debug("Buffering modified Connect packet")
+                        pendingPacket = modified
+                    }
+                    attachBridgeIfReady()
+                },
+                {
+                    rejectAndClose(ctx, ctx.alloc().buffer(0), "BACKEND_UNAVAILABLE")
+                },
+            )
 
         } catch (e: Exception) {
-            logger.warn("Interception failed", e)
-            recordInvalidAndClose(ctx, msg)
+            recordInvalidAndClose(ctx, msg, "INTERCEPTOR_EXCEPTION")
         }
     }
 
     private fun passThrough(ctx: ChannelHandlerContext, buf: ByteBuf) {
         handled = true
+        releaseHandshakeLease()
         cumulation = null
         val stream = backendStream
         if (stream != null) {
@@ -233,6 +280,7 @@ class ConnectPacketInterceptor(
     }
 
     override fun handlerRemoved(ctx: ChannelHandlerContext) {
+        releaseHandshakeLease()
         cumulation?.release()
         cumulation = null
         pendingRemainder?.release()
@@ -250,6 +298,7 @@ class ConnectPacketInterceptor(
             if (ctx.pipeline().context(this) == null) {
                 return@Runnable
             }
+            ctx.pipeline().addLast(ClientLanguageUpdateInterceptor(session, playerManager))
             ctx.pipeline().addLast(StreamBridge(stream))
             val remainder = pendingRemainder
             if (remainder != null) {
@@ -265,7 +314,19 @@ class ConnectPacketInterceptor(
         }
     }
 
-    private fun recordInvalidAndClose(ctx: ChannelHandlerContext, msg: Any) {
+    private fun recordInvalidAndClose(ctx: ChannelHandlerContext, msg: Any, reason: String) {
+        releaseHandshakeLease()
+        metrics?.incrementHandshakeError(reason)
+        logger.warn(
+            "{}",
+            StructuredLog.event(
+                category = "handshake",
+                severity = "WARN",
+                reason = reason,
+                correlationId = session.id.toString(),
+                fields = mapOf("remoteKey" to remoteKey),
+            )
+        )
         try {
             rateLimitService.invalidPacketsPerSession.tryAcquire(session.id.toString())
         } finally {
@@ -276,7 +337,19 @@ class ConnectPacketInterceptor(
         }
     }
 
-    private fun rejectAndClose(ctx: ChannelHandlerContext, msg: Any) {
+    private fun rejectAndClose(ctx: ChannelHandlerContext, msg: Any, reason: String) {
+        releaseHandshakeLease()
+        metrics?.incrementHandshakeError(reason)
+        logger.warn(
+            "{}",
+            StructuredLog.event(
+                category = "handshake",
+                severity = "WARN",
+                reason = reason,
+                correlationId = session.id.toString(),
+                fields = mapOf("remoteKey" to remoteKey),
+            )
+        )
         try {
             if (ReferenceCountUtil.refCnt(msg) > 0) {
                 ReferenceCountUtil.release(msg)
@@ -284,6 +357,11 @@ class ConnectPacketInterceptor(
         } finally {
             ctx.close()
         }
+    }
+
+    private fun releaseHandshakeLease() {
+        handshakeLease?.close()
+        handshakeLease = null
     }
 
     /**
@@ -300,10 +378,12 @@ class ConnectPacketInterceptor(
                 val backend = router.findBackend(transfer.targetServerId)
                 if (backend != null) {
                     requestedBackendId = backend.id
-                    logger.info("Transfer token selects backend {}", requestedBackendId)
+                    logger.debug("Transfer token selects backend {}", requestedBackendId)
                 } else {
                     logger.warn("Transfer token requested unknown backend {}", transfer.targetServerId)
                 }
+            } else if (transferTokenValidator.isTransferTokenCandidate(encoded)) {
+                throw RoutingDeniedException("Invalid transfer token")
             }
         }
         val context = RoutingContext(
@@ -319,6 +399,23 @@ class ConnectPacketInterceptor(
             identityTokenPresent = !connect.identityToken.isNullOrBlank(),
         )
         val backend = router.selectBackend(context)
+        if (backendAvailabilityTracker.isTemporarilyUnavailable(backend.id)) {
+            val fallback = router.selectInitialBackend(context.copy(requestedBackendId = null))
+            if (fallback.id != backend.id && !backendAvailabilityTracker.isTemporarilyUnavailable(fallback.id)) {
+                logger.warn(
+                    "{}",
+                    StructuredLog.event(
+                        category = "routing",
+                        severity = "WARN",
+                        reason = "BACKEND_TEMPORARILY_UNAVAILABLE",
+                        correlationId = session.id.toString(),
+                        fields = mapOf("requested" to backend.id, "fallback" to fallback.id),
+                    )
+                )
+                session.selectedBackendId = fallback.id
+                return fallback.id
+            }
+        }
         session.selectedBackendId = backend.id
         return backend.id
     }

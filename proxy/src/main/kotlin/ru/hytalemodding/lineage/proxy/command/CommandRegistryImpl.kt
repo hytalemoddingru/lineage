@@ -116,7 +116,7 @@ class CommandRegistryImpl : CommandRegistry {
 
     companion object {
         private const val DEFAULT_OWNER_ID = "lineage"
-        private val NAME_PATTERN = Regex("^[A-Za-z0-9_.-]+$")
+        private val NAME_PATTERN = Regex("^[\\p{L}\\p{N}_.\\-?]+$")
         private val OWNER_PATTERN = Regex("^[A-Za-z0-9_.-]+$")
     }
 }

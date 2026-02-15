@@ -10,6 +10,11 @@ package ru.hytalemodding.lineage.proxy.command
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.api.command.SenderType
 import ru.hytalemodding.lineage.api.player.ProxyPlayer
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessages
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessagesLoader
+import ru.hytalemodding.lineage.proxy.player.ProxyPlayerImpl
+import ru.hytalemodding.lineage.proxy.player.ProxySystemMessageFormatter
+import ru.hytalemodding.lineage.proxy.text.RenderLimits
 import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
 import java.util.UUID
 
@@ -19,14 +24,26 @@ import java.util.UUID
 class ProxyPlayerCommandSender(
     private val player: ProxyPlayer,
     private val responder: CommandResponder,
+    private val messages: ProxyMessages = ProxyMessagesLoader.defaults(),
+    private val renderLimitsProvider: () -> RenderLimits = { RenderLimits() },
 ) : CommandSender {
+    val playerId: UUID
+        get() = player.id
+
     override val name: String
         get() = player.username
 
     override val type: SenderType = SenderType.PLAYER
+    val language: String?
+        get() = (player as? ProxyPlayerImpl)?.language
 
     override fun sendMessage(message: String) {
-        responder.send(player.id, message)
+        val formatted = if (player is ProxyPlayerImpl) {
+            ProxySystemMessageFormatter.format(player.language, message, messages, renderLimitsProvider())
+        } else {
+            message
+        }
+        responder.send(player.id, formatted)
     }
 }
 

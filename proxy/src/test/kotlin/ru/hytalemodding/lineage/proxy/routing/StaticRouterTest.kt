@@ -85,6 +85,8 @@ class StaticRouterTest {
             referral = ReferralConfig(host = "127.0.0.1", port = 25565),
             limits = ProtocolLimitsConfig(),
             rateLimits = RateLimitConfig(
+                handshakeConcurrentMax = 256,
+                routingConcurrentMax = 256,
                 connectionPerIp = RateLimitWindow(20, 10_000),
                 handshakePerIp = RateLimitWindow(20, 10_000),
                 streamsPerSession = RateLimitWindow(8, 10_000),

@@ -9,6 +9,7 @@ package ru.hytalemodding.lineage.backend.config
 
 import org.tomlj.Toml
 import org.tomlj.TomlParseResult
+import ru.hytalemodding.lineage.shared.security.SecretStrengthPolicy
 import java.io.Reader
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -80,9 +81,9 @@ object BackendConfigLoader {
             controlReplayMaxEntries = DEFAULT_CONTROL_REPLAY_MAX_ENTRIES,
             controlMaxSkewMillis = DEFAULT_CONTROL_MAX_SKEW_MILLIS,
             controlTtlMillis = DEFAULT_CONTROL_TTL_MILLIS,
+            controlMaxInflight = DEFAULT_CONTROL_MAX_INFLIGHT,
+            controlExpectedSenderId = DEFAULT_CONTROL_EXPECTED_SENDER_ID,
             requireAuthenticatedMode = true,
-            agentless = true,
-            javaAgentFallback = false,
             enforceProxy = true,
             referralSourceHost = DEFAULT_PROXY_CONNECT_HOST,
             referralSourcePort = DEFAULT_PROXY_CONNECT_PORT,
@@ -94,10 +95,19 @@ object BackendConfigLoader {
     }
 
     private fun parseResult(result: TomlParseResult): BackendConfig {
+        validateUnknownKeys(result)
         val schemaVersion = parseSchemaVersion(result)
         val serverId = requireString(result, "server_id")
         val proxySecret = requireString(result, "proxy_secret")
+        SecretStrengthPolicy.validationError(proxySecret, "proxy_secret")?.let { message ->
+            throw ConfigException(message)
+        }
         val previousProxySecret = optionalString(result, "proxy_secret_previous")
+        if (previousProxySecret != null) {
+            SecretStrengthPolicy.validationError(previousProxySecret, "proxy_secret_previous")?.let { message ->
+                throw ConfigException(message)
+            }
+        }
         val proxyConnectHost = resolveProxyConnectHost(result)
         val proxyConnectPort = resolveProxyConnectPort(result)
         val messagingHost = resolveMessagingHost(result)
@@ -109,10 +119,21 @@ object BackendConfigLoader {
         val controlReplayMaxEntries = resolveControlReplayMaxEntries(result)
         val controlMaxSkewMillis = resolveControlMaxSkew(result)
         val controlTtlMillis = resolveControlTtl(result)
+        val controlMaxInflight = resolveControlMaxInflight(result)
+        val controlExpectedSenderId = resolveControlExpectedSenderId(result)
         val requireAuthenticatedMode = result.getBoolean("require_authenticated_mode") ?: true
-        val agentless = result.getBoolean("agentless") ?: true
-        val javaAgentFallback = result.getBoolean("javaagent_fallback") ?: false
+        validateRemovedAgentFlags(result)
         val enforceProxy = result.getBoolean("enforce_proxy") ?: true
+        if (!enforceProxy) {
+            throw ConfigException("enforce_proxy must be true in v0.4.0")
+        }
+        validateEndpointConflicts(
+            proxyConnectHost = proxyConnectHost,
+            proxyConnectPort = proxyConnectPort,
+            messagingHost = messagingHost,
+            messagingPort = messagingPort,
+            messagingEnabled = messagingEnabled,
+        )
         val referralSourceHost = resolveReferralSourceHost(result, proxyConnectHost)
         val referralSourcePort = resolveReferralSourcePort(result, proxyConnectPort)
         val replayWindowMillis = resolveReplayWindow(result)
@@ -133,9 +154,9 @@ object BackendConfigLoader {
             controlReplayMaxEntries = controlReplayMaxEntries,
             controlMaxSkewMillis = controlMaxSkewMillis,
             controlTtlMillis = controlTtlMillis,
+            controlMaxInflight = controlMaxInflight,
+            controlExpectedSenderId = controlExpectedSenderId,
             requireAuthenticatedMode = requireAuthenticatedMode,
-            agentless = agentless,
-            javaAgentFallback = javaAgentFallback,
             enforceProxy = enforceProxy,
             referralSourceHost = referralSourceHost,
             referralSourcePort = referralSourcePort,
@@ -177,32 +198,85 @@ object BackendConfigLoader {
     private fun write(path: Path, config: BackendConfig) {
         path.parent?.let { Files.createDirectories(it) }
         Files.newBufferedWriter(path, StandardCharsets.UTF_8).use { writer ->
-            writer.appendLine("schema_version = ${config.schemaVersion}")
-            writer.appendLine()
-            writer.appendLine("server_id = \"${config.serverId}\"")
-            writer.appendLine("proxy_secret = \"${config.proxySecret}\"")
-            config.previousProxySecret?.let { previous ->
-                writer.appendLine("proxy_secret_previous = \"$previous\"")
-            }
-            writer.appendLine("proxy_connect_host = \"${config.proxyConnectHost}\"")
-            writer.appendLine("proxy_connect_port = ${config.proxyConnectPort}")
-            writer.appendLine("referral_source_host = \"${config.referralSourceHost}\"")
-            writer.appendLine("referral_source_port = ${config.referralSourcePort}")
-            writer.appendLine("messaging_host = \"${config.messagingHost}\"")
-            writer.appendLine("messaging_port = ${config.messagingPort}")
-            writer.appendLine("messaging_enabled = ${config.messagingEnabled}")
-            writer.appendLine("control_sender_id = \"${config.controlSenderId}\"")
-            writer.appendLine("control_max_payload = ${config.controlMaxPayload}")
-            writer.appendLine("control_replay_window_millis = ${config.controlReplayWindowMillis}")
-            writer.appendLine("control_replay_max_entries = ${config.controlReplayMaxEntries}")
-            writer.appendLine("control_max_skew_millis = ${config.controlMaxSkewMillis}")
-            writer.appendLine("control_ttl_millis = ${config.controlTtlMillis}")
-            writer.appendLine("require_authenticated_mode = ${config.requireAuthenticatedMode}")
-            writer.appendLine("agentless = ${config.agentless}")
-            writer.appendLine("javaagent_fallback = ${config.javaAgentFallback}")
-            writer.appendLine("enforce_proxy = ${config.enforceProxy}")
-            writer.appendLine("replay_window_millis = ${config.replayWindowMillis}")
-            writer.appendLine("replay_max_entries = ${config.replayMaxEntries}")
+            writer.write(
+                buildString {
+                    appendLine("# ============================================================")
+                    appendLine("# Lineage Backend-Mod Configuration")
+                    appendLine("# Audience: server administrators and operators.")
+                    appendLine("# ============================================================")
+                    appendLine()
+                    appendLine("# Config schema version.")
+                    appendLine("# TOUCH ONLY IF YOU KNOW WHAT YOU ARE DOING.")
+                    appendLine("schema_version = ${config.schemaVersion}")
+                    appendLine()
+                    appendLine("# --- Backend identity ---")
+                    appendLine("# Unique backend id used by proxy routing and transfer commands.")
+                    appendLine("server_id = \"${config.serverId}\"")
+                    appendLine()
+                    appendLine("# --- Trust boundary with proxy ---")
+                    appendLine("# Shared HMAC secret used to validate control/referral traffic.")
+                    appendLine("# MUST match proxy security.proxy_secret.")
+                    appendLine("# TOUCH ONLY IF YOU KNOW WHAT YOU ARE DOING.")
+                    appendLine("proxy_secret = \"${config.proxySecret}\"")
+                    config.previousProxySecret?.let { previous ->
+                        appendLine("# Previous proxy secret accepted during secret rotation window.")
+                        appendLine("# Optional; remove after rollout is complete.")
+                        appendLine("proxy_secret_previous = \"$previous\"")
+                    }
+                    appendLine()
+                    appendLine("# --- How this backend connects players back to proxy ---")
+                    appendLine("# Proxy host sent to backend referral system.")
+                    appendLine("proxy_connect_host = \"${config.proxyConnectHost}\"")
+                    appendLine("# Proxy port players should reconnect through.")
+                    appendLine("proxy_connect_port = ${config.proxyConnectPort}")
+                    appendLine()
+                    appendLine("# --- Referral source metadata embedded into redirects ---")
+                    appendLine("# Usually same as proxy_connect_host/proxy_connect_port.")
+                    appendLine("referral_source_host = \"${config.referralSourceHost}\"")
+                    appendLine("referral_source_port = ${config.referralSourcePort}")
+                    appendLine()
+                    appendLine("# --- UDP messaging channel to proxy ---")
+                    appendLine("# TOUCH ONLY IF YOU KNOW WHAT YOU ARE DOING.")
+                    appendLine("# UDP destination host where proxy messaging listens.")
+                    appendLine("messaging_host = \"${config.messagingHost}\"")
+                    appendLine("# UDP destination port where proxy messaging listens.")
+                    appendLine("messaging_port = ${config.messagingPort}")
+                    appendLine("# Master switch for backend<->proxy control-plane.")
+                    appendLine("messaging_enabled = ${config.messagingEnabled}")
+                    appendLine()
+                    appendLine("# --- Control-plane envelope policy ---")
+                    appendLine("# Sender id stamped into backend control messages.")
+                    appendLine("control_sender_id = \"${config.controlSenderId}\"")
+                    appendLine("# Max payload bytes accepted by backend control-plane.")
+                    appendLine("control_max_payload = ${config.controlMaxPayload}")
+                    appendLine("# Replay protection window in milliseconds.")
+                    appendLine("control_replay_window_millis = ${config.controlReplayWindowMillis}")
+                    appendLine("# Replay cache size for control-plane messages.")
+                    appendLine("control_replay_max_entries = ${config.controlReplayMaxEntries}")
+                    appendLine("# Allowed clock skew in milliseconds.")
+                    appendLine("control_max_skew_millis = ${config.controlMaxSkewMillis}")
+                    appendLine("# Envelope TTL in milliseconds.")
+                    appendLine("control_ttl_millis = ${config.controlTtlMillis}")
+                    appendLine("# Max concurrently processed inbound control messages.")
+                    appendLine("control_max_inflight = ${config.controlMaxInflight}")
+                    appendLine("# Expected sender id for inbound proxy control messages.")
+                    appendLine("control_expected_sender_id = \"${config.controlExpectedSenderId}\"")
+                    appendLine()
+                    appendLine("# --- Security invariants ---")
+                    appendLine("# Keep true unless you are intentionally running insecure diagnostics.")
+                    appendLine("# TOUCH ONLY IF YOU KNOW WHAT YOU ARE DOING.")
+                    appendLine("# Require AUTHENTICATED mode on Hytale server.")
+                    appendLine("require_authenticated_mode = ${config.requireAuthenticatedMode}")
+                    appendLine("# Enforce proxy-only entrypoint (direct join must be blocked).")
+                    appendLine("enforce_proxy = ${config.enforceProxy}")
+                    appendLine()
+                    appendLine("# --- Replay protection for referral tokens ---")
+                    appendLine("# Referral replay window in milliseconds.")
+                    appendLine("replay_window_millis = ${config.replayWindowMillis}")
+                    appendLine("# Max referral replay entries kept in memory.")
+                    appendLine("replay_max_entries = ${config.replayMaxEntries}")
+                }
+            )
         }
     }
 
@@ -290,8 +364,8 @@ object BackendConfigLoader {
 
     private fun resolveControlMaxPayload(result: TomlParseResult): Int {
         val value = result.getLong("control_max_payload") ?: DEFAULT_CONTROL_MAX_PAYLOAD.toLong()
-        if (value <= 0 || value > Int.MAX_VALUE) {
-            throw ConfigException("control_max_payload must be a positive integer")
+        if (value !in 1..MAX_CONTROL_PAYLOAD_BYTES) {
+            throw ConfigException("control_max_payload must be in 1..$MAX_CONTROL_PAYLOAD_BYTES")
         }
         return value.toInt()
     }
@@ -328,6 +402,66 @@ object BackendConfigLoader {
         return value
     }
 
+    private fun resolveControlMaxInflight(result: TomlParseResult): Int {
+        val value = result.getLong("control_max_inflight") ?: DEFAULT_CONTROL_MAX_INFLIGHT.toLong()
+        if (value <= 0 || value > Int.MAX_VALUE) {
+            throw ConfigException("control_max_inflight must be a positive integer")
+        }
+        return value.toInt()
+    }
+
+    private fun resolveControlExpectedSenderId(result: TomlParseResult): String {
+        val value = result.getString("control_expected_sender_id") ?: DEFAULT_CONTROL_EXPECTED_SENDER_ID
+        if (value.isBlank()) {
+            throw ConfigException("control_expected_sender_id must not be blank")
+        }
+        return value
+    }
+
+    private fun validateRemovedAgentFlags(result: TomlParseResult) {
+        if (result.contains("agentless")) {
+            throw ConfigException("agentless is removed in v0.4.0; remove this key from config")
+        }
+        if (result.contains("javaagent_fallback")) {
+            throw ConfigException("javaagent_fallback is removed in v0.4.0; JavaAgent mode is no longer supported")
+        }
+    }
+
+    private fun validateUnknownKeys(result: TomlParseResult) {
+        val unknown = result.keySet()
+            .filterNot { it in ALLOWED_KEYS }
+            .sorted()
+        if (unknown.isNotEmpty()) {
+            throw ConfigException("Unknown backend config keys: ${unknown.joinToString(", ")}")
+        }
+    }
+
+    private fun validateEndpointConflicts(
+        proxyConnectHost: String,
+        proxyConnectPort: Int,
+        messagingHost: String,
+        messagingPort: Int,
+        messagingEnabled: Boolean,
+    ) {
+        if (!messagingEnabled) {
+            return
+        }
+        if (proxyConnectPort == messagingPort && hostBindingsOverlap(proxyConnectHost, messagingHost)) {
+            throw ConfigException(
+                "proxy_connect_host/proxy_connect_port cannot overlap messaging_host/messaging_port when messaging is enabled"
+            )
+        }
+    }
+
+    private fun hostBindingsOverlap(left: String, right: String): Boolean {
+        val leftHost = left.trim().lowercase()
+        val rightHost = right.trim().lowercase()
+        if (leftHost == rightHost) {
+            return true
+        }
+        return leftHost in WILDCARD_BIND_HOSTS || rightHost in WILDCARD_BIND_HOSTS
+    }
+
     private const val DEFAULT_PROXY_CONNECT_HOST = "127.0.0.1"
     private const val DEFAULT_PROXY_CONNECT_PORT = 25565
     private const val DEFAULT_MESSAGING_HOST = "127.0.0.1"
@@ -339,4 +473,37 @@ object BackendConfigLoader {
     private const val DEFAULT_CONTROL_REPLAY_MAX_ENTRIES = 100_000
     private const val DEFAULT_CONTROL_MAX_SKEW_MILLIS = 120_000L
     private const val DEFAULT_CONTROL_TTL_MILLIS = 10_000L
+    private const val DEFAULT_CONTROL_MAX_INFLIGHT = 256
+    private const val DEFAULT_CONTROL_EXPECTED_SENDER_ID = "proxy"
+    private const val MAX_CONTROL_PAYLOAD_BYTES = 65_535
+    private val WILDCARD_BIND_HOSTS = setOf("0.0.0.0", "::", "[::]")
+    private val ALLOWED_KEYS = setOf(
+        "schema_version",
+        "server_id",
+        "proxy_secret",
+        "proxy_secret_previous",
+        "proxy_connect_host",
+        "proxy_connect_port",
+        "proxy_host",
+        "proxy_port",
+        "messaging_host",
+        "messaging_port",
+        "messaging_enabled",
+        "control_sender_id",
+        "control_max_payload",
+        "control_replay_window_millis",
+        "control_replay_max_entries",
+        "control_max_skew_millis",
+        "control_ttl_millis",
+        "control_max_inflight",
+        "control_expected_sender_id",
+        "require_authenticated_mode",
+        "enforce_proxy",
+        "referral_source_host",
+        "referral_source_port",
+        "replay_window_millis",
+        "replay_max_entries",
+        "agentless",
+        "javaagent_fallback",
+    )
 }

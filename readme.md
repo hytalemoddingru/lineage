@@ -2,115 +2,242 @@
 
 # Lineage Proxy
 
+<p>
+  <b>English</b> | <a href="readme_ru.md">Русский</a>
+</p>
+
 [![Maven Central](https://img.shields.io/maven-central/v/ru.hytalemodding.lineage/api.svg?label=maven%20central%20(api))](https://central.sonatype.com/artifact/ru.hytalemodding.lineage/api)
 [![Maven Central](https://img.shields.io/maven-central/v/ru.hytalemodding.lineage/shared.svg?label=maven%20central%20(shared))](https://central.sonatype.com/artifact/ru.hytalemodding.lineage/shared)
 [![Kotlin](https://img.shields.io/badge/kotlin-2.3.0-blue)](https://kotlinlang.org/)
 
-Lineage is a QUIC/TLS proxy for Hytale that keeps the official AUTHENTICATED
-flow intact while still allowing full control over routing and handshake metadata.
+Lineage is a QUIC/TLS proxy for Hytale that preserves the official AUTHENTICATED flow while giving full control over routing, transfers, command bridge, and operational policy.
 
 > [!WARNING]
-> **WORK IN PROGRESS**
->
-> This project is currently in **active development** and APIs are subject to change.
-> It has not yet been battle-tested in large-scale production environments. Use at your own risk.
-> We are actively working on core stabilization and preparing for the **v1.x.x** release.
+> Work in progress. APIs and runtime behavior may still change before stable 1.x.
 
-## What it includes
+## Community
 
-- `proxy`: QUIC/TLS listener, routing, mod loader, messaging
-- `backend-mod`: server-side token validation (agentless) and optional fingerprint bridge
-- `agent`: legacy Java agent patch for certificate binding (deprecated fallback)
-- `api`: modding API
-- `shared`: shared token and protocol utilities
+- Telegram: https://t.me/hytalemoddingru
+- Reddit: https://www.reddit.com/r/hytalemoddingru/
+- Discord: https://discord.gg/Smt798UNk9
+- Modding docs: https://lineage.hytalemodding.ru
 
-## Quick start
+## Table of contents
 
-Build artifacts:
+- [Project overview](#project-overview)
+- [Core features](#core-features)
+- [Repository structure](#repository-structure)
+- [For server admins](#for-server-admins)
+- [For modders](#for-modders)
+- [For contributors](#for-contributors)
+- [Support](#support)
 
+## Project overview
+
+Lineage consists of two runtime components:
+
+- `proxy`: QUIC listener, routing, command layer, observability, localization, text rendering, mod loader.
+- `backend-mod`: strict backend-side enforcement and control-plane integration.
+
+Connection path:
+
+1. Client opens QUIC/TLS to `proxy`.
+2. Proxy captures Connect (stream `0`) and validates protocol constraints.
+3. Routing selects backend.
+4. Proxy injects referral and signed transfer context.
+5. Backend-mod validates auth-mode, token constraints, replay policy, and referral source.
+
+Control plane:
+
+- Authenticated UDP messaging between proxy and backend-mod.
+- Strict envelope checks: sender, timestamp, ttl, nonce replay, payload size.
+- Backend availability signals are used by transfer and fallback behavior.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant P as Lineage Proxy
+    participant B as Backend Server
+    participant BM as backend-mod
+    C->>P: QUIC/TLS connect + Connect packet
+    P->>P: Validate protocol limits and extract metadata
+    P->>P: Resolve routing target
+    P->>B: Open backend QUIC/TLS session
+    P->>B: Forward Connect + referral + transfer context
+    B->>BM: Handshake interception
+    BM->>BM: Validate auth mode, token, replay window
+    BM-->>B: Allow or deny session
+    P-->>C: Stream bridge active (or disconnect reason)
 ```
-gradle :proxy:shadowJar :backend-mod:shadowJar :agent:shadowJar
+
+## Core features
+
+- Security-first by default:
+  - strict config validation and fail-fast startup,
+  - replay protection for transfer/control messages,
+  - no token/secret logging,
+  - authenticated backend enforcement.
+- Operational resilience:
+  - startup-order tolerant backend command sync,
+  - backend availability tracking,
+  - fallback routing on transfer/connect failures,
+  - observability endpoints (`/health`, `/status`, `/metrics`).
+- Admin UX:
+  - proxy commands (`help`, `transfer`, `list`, `info`, `ping`, `perm`, `mod`, `messages reload`, `stop`),
+  - console history + log archives (limits configurable).
+- Modding UX:
+  - stable API modules (`api`, `shared`),
+  - `LocalizationService` + `TextRendererService`,
+  - bounded color/markup renderer with HEX and gradients.
+
+## Repository structure
+
+- `proxy/` - Lineage proxy runtime.
+- `backend-mod/` - backend enforcement plugin.
+- `api/` - public API for proxy mods.
+- `shared/` - shared protocol/token/logging primitives.
+- `docs/modding/` - modding and operations documentation.
+
+## For server admins
+
+### 1. Download (recommended)
+
+Download prebuilt artifacts from GitHub Releases:
+
+- Latest release: https://github.com/hytalemoddingru/lineage/releases/latest
+- All releases: https://github.com/hytalemoddingru/lineage/releases
+
+Required files:
+
+- `lineage-proxy-<version>.jar`
+- `lineage-backend-mod-<version>.jar`
+
+### 2. Install
+
+- Proxy:
+
+```bash
+java -jar lineage-proxy-<version>.jar
 ```
 
-Prerequisite for backend-mod:
+- Backend mod:
+  copy `lineage-backend-mod-<version>.jar` into each backend server `mods/` directory.
 
-- Place `HytaleServer.jar` in `libs/` (this file is not included in the repo).
-- Ensure the server is running in AUTHENTICATED mode.
+### 3. Configure
 
-Run the proxy:
+Proxy runtime files:
 
+- `config.toml`
+- `messages/*.toml`
+- `styles/rendering.toml`
+- `.consolehistory`
+- `logs/`
+
+Must match between proxy and backend-mod:
+
+- `security.proxy_secret` <-> backend `proxy_secret`
+- `messaging.host` / `messaging.port` <-> backend `messaging_host` / `messaging_port`
+- `messaging.enabled` <-> backend `messaging_enabled`
+- `referral.host` / `referral.port` <-> backend expected referral source
+
+Backend-mod dependency note:
+
+- `backend-mod` resolves Hytale server classes via Maven:
+  - repository: `https://maven.hytale.com/release`
+  - dependency: `com.hypixel.hytale:Server:<version>`
+  - version source: `hytaleServerVersion` in `gradle.properties`
+
+### 4. Operate
+
+Quick checks:
+
+1. Verify `/health`, `/status`, `/metrics`.
+2. Restart one backend while players are online and confirm fallback behavior.
+3. Test startup-order resilience: start backends first, then proxy.
+4. Reload text/localization files via `messages reload`.
+
+Detailed operations docs:
+
+- `docs/modding/operations-runbook.md`
+- `docs/modding/logging-ux.md`
+- `docs/modding/security-invariants.md`
+- `docs/modding/proxy-auth-routing-flow.md`
+
+### 5. Build from source (optional)
+
+If you prefer local builds instead of GitHub release artifacts:
+
+```bash
+./gradlew :proxy:shadowJar :backend-mod:shadowJar
 ```
-java -jar proxy/build/libs/lineage-proxy-<version>.jar
-```
 
-Optional: pass a custom config path instead of the default `config.toml` in the working directory.
+## For modders
 
-Install backend pieces:
+Public docs index:
 
-- Copy `backend-mod/build/libs/lineage-backend-mod-<version>.jar` into the server mods folder.
-- Agentless mode is the default and recommended path.
-- Optional (deprecated): start the server with `-javaagent:/path/to/lineage-agent-<version>.jar` only if `javaagent_fallback = true` is enabled in backend config.
+- `docs/modding/index.md`
 
-Configure:
+Key guides:
 
-- Proxy config: `config.toml` (auto-created on first run).
-- Backend config: `<server data dir>/config.toml` (auto-created on first run).
-- `security.proxy_secret` must match backend `proxy_secret`.
-- Proxy `messaging.host`/`messaging.port` must match backend `messaging_host`/`messaging_port` when messaging is enabled.
-- Keep `messaging.enabled` and backend `messaging_enabled` consistent across nodes.
+- `docs/modding/getting-started.md`
+- `docs/modding/services.md`
+- `docs/modding/commands.md`
+- `docs/modding/events.md`
+- `docs/modding/localization-text.md`
 
-Config highlights:
+Dependencies:
 
-- `referral.host` / `referral.port` define the referral source injected into Connect.
-- `limits.*` controls protocol sanity limits (language, identity token, username, referral data, host, connect size).
-- `rate_limits.*` provides basic per-IP and per-session abuse protection.
-- Backend config adds `agentless` (default), `javaagent_fallback`, `require_authenticated_mode`, `replay_window_millis`, and `replay_max_entries` for security controls.
-- Proxy tokens use v3 (nonce + cert binding) with v1/v2 compatibility.
-
-Transfer:
-
-- Use `/transfer <backendId>` on the backend server to issue a referral to the proxy.
-- If a command name conflict exists, use `/lineage:transfer <backendId>`.
-
-## Documentation
-
-- https://lineage.hytalemodding.ru (modding guide + API reference)
-
-## Dependency
-
-Gradle Kotlin DSL:
+### Gradle Kotlin DSL
 
 ```kotlin
 dependencies {
-    implementation("ru.hytalemodding.lineage:api:0.3.0")
-    implementation("ru.hytalemodding.lineage:shared:0.3.0")
+    implementation("ru.hytalemodding.lineage:api:0.4.0")
+    implementation("ru.hytalemodding.lineage:shared:0.4.0")
 }
 ```
 
-Gradle Groovy DSL:
+### Gradle Groovy DSL
 
 ```groovy
 dependencies {
-    implementation "ru.hytalemodding.lineage:api:0.3.0"
-    implementation "ru.hytalemodding.lineage:shared:0.3.0"
+    implementation "ru.hytalemodding.lineage:api:0.4.0"
+    implementation "ru.hytalemodding.lineage:shared:0.4.0"
 }
 ```
 
-Maven:
+### Maven
 
 ```xml
 <dependencies>
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>api</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
   </dependency>
   <dependency>
     <groupId>ru.hytalemodding.lineage</groupId>
     <artifactId>shared</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
   </dependency>
 </dependencies>
+```
+
+## For contributors
+
+- Read: `contributing.md`
+- Conduct: `code_of_conduct.md`
+- Keep changes small, test-covered, and documented in `docs/modding/` when API/behavior changes.
+
+Local validation:
+
+```bash
+./gradlew test
+```
+
+Release build validation:
+
+```bash
+./gradlew :proxy:shadowJar :backend-mod:shadowJar
 ```
 
 ## Support

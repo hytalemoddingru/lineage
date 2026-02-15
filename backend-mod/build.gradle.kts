@@ -5,6 +5,14 @@ plugins {
 
 repositories {
     mavenCentral()
+    maven {
+        name = "hytale-release"
+        url = uri("https://maven.hytale.com/release")
+    }
+    maven {
+        name = "hytale-pre-release"
+        url = uri("https://maven.hytale.com/pre-release")
+    }
 }
 
 kotlin {
@@ -22,10 +30,15 @@ dependencies {
     implementation(libs.tomlj)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.logback.classic)
-    
-    compileOnly(files("../libs/HytaleServer.jar"))
+
+    val hytaleServerVersion = providers
+        .gradleProperty("hytaleServerVersion")
+        .orElse("2026.02.06-aa1b071c2")
+        .get()
+    compileOnly("com.hypixel.hytale:Server:$hytaleServerVersion")
 
     testImplementation(libs.junit.jupiter.api)
+    testImplementation(libs.logback.classic)
     testRuntimeOnly(libs.junit.jupiter.engine)
 }
 

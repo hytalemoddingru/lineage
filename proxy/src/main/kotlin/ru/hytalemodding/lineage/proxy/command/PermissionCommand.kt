@@ -13,6 +13,8 @@ import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.command.CommandSender
 import ru.hytalemodding.lineage.api.permission.PermissionSubject
 import ru.hytalemodding.lineage.api.player.PlayerManager
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessages
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessagesLoader
 import ru.hytalemodding.lineage.proxy.permission.PermissionCheckerImpl
 import ru.hytalemodding.lineage.proxy.permission.PermissionStore
 
@@ -23,6 +25,7 @@ class PermissionCommand(
     private val permissionChecker: PermissionCheckerImpl,
     private val players: PlayerManager,
     private val store: PermissionStore,
+    private val messages: ProxyMessages = ProxyMessagesLoader.defaults(),
 ) : Command {
     override val name: String = "perm"
     override val aliases: List<String> = listOf("permission")
@@ -32,17 +35,18 @@ class PermissionCommand(
     override val flags: Set<CommandFlag> = emptySet()
 
     override fun execute(context: CommandContext) {
+        val language = (context.sender as? ProxyPlayerCommandSender)?.language
         val args = context.args
         if (args.isEmpty()) {
-            sendUsage(context.sender)
+            sendUsage(context.sender, language)
             return
         }
         when (args[0].lowercase()) {
-            "grant" -> grant(context.sender, args.getOrNull(1), args.getOrNull(2))
-            "revoke" -> revoke(context.sender, args.getOrNull(1), args.getOrNull(2))
-            "clear" -> clear(context.sender, args.getOrNull(1))
-            "list" -> list(context.sender, args.getOrNull(1))
-            else -> sendUsage(context.sender)
+            "grant" -> grant(context.sender, language, args.getOrNull(1), args.getOrNull(2))
+            "revoke" -> revoke(context.sender, language, args.getOrNull(1), args.getOrNull(2))
+            "clear" -> clear(context.sender, language, args.getOrNull(1))
+            "list" -> list(context.sender, language, args.getOrNull(1))
+            else -> sendUsage(context.sender, language)
         }
     }
 
@@ -64,52 +68,64 @@ class PermissionCommand(
         return emptyList()
     }
 
-    private fun grant(sender: CommandSender, targetName: String?, permission: String?) {
+    private fun grant(sender: CommandSender, language: String?, targetName: String?, permission: String?) {
         if (targetName.isNullOrBlank() || permission.isNullOrBlank()) {
-            sender.sendMessage("Usage: perm grant <player> <permission>")
+            sender.sendMessage(messages.text(language, "perm_usage_grant"))
             return
         }
         val subject = resolveSubject(targetName)
         permissionChecker.grant(subject, permission)
         store.save(permissionChecker.snapshot())
-        sender.sendMessage("Granted $permission to ${subject.name}.")
+        sender.sendMessage(
+            messages.text(
+                language,
+                "perm_granted",
+                mapOf("permission" to permission, "subject" to subject.name),
+            )
+        )
     }
 
-    private fun revoke(sender: CommandSender, targetName: String?, permission: String?) {
+    private fun revoke(sender: CommandSender, language: String?, targetName: String?, permission: String?) {
         if (targetName.isNullOrBlank() || permission.isNullOrBlank()) {
-            sender.sendMessage("Usage: perm revoke <player> <permission>")
+            sender.sendMessage(messages.text(language, "perm_usage_revoke"))
             return
         }
         val subject = resolveSubject(targetName)
         permissionChecker.revoke(subject, permission)
         store.save(permissionChecker.snapshot())
-        sender.sendMessage("Revoked $permission from ${subject.name}.")
+        sender.sendMessage(
+            messages.text(
+                language,
+                "perm_revoked",
+                mapOf("permission" to permission, "subject" to subject.name),
+            )
+        )
     }
 
-    private fun clear(sender: CommandSender, targetName: String?) {
+    private fun clear(sender: CommandSender, language: String?, targetName: String?) {
         if (targetName.isNullOrBlank()) {
-            sender.sendMessage("Usage: perm clear <player>")
+            sender.sendMessage(messages.text(language, "perm_usage_clear"))
             return
         }
         val subject = resolveSubject(targetName)
         permissionChecker.clear(subject)
         store.save(permissionChecker.snapshot())
-        sender.sendMessage("Cleared permissions for ${subject.name}.")
+        sender.sendMessage(messages.text(language, "perm_cleared", mapOf("subject" to subject.name)))
     }
 
-    private fun list(sender: CommandSender, targetName: String?) {
+    private fun list(sender: CommandSender, language: String?, targetName: String?) {
         if (targetName.isNullOrBlank()) {
-            sender.sendMessage("Usage: perm list <player>")
+            sender.sendMessage(messages.text(language, "perm_usage_list"))
             return
         }
         val subject = resolveSubject(targetName)
         val permissions = permissionChecker.list(subject).sorted()
         if (permissions.isEmpty()) {
-            sender.sendMessage("No permissions for ${subject.name}.")
+            sender.sendMessage(messages.text(language, "perm_none", mapOf("subject" to subject.name)))
             return
         }
-        sender.sendMessage("Permissions for ${subject.name}:")
-        permissions.forEach { sender.sendMessage("- $it") }
+        sender.sendMessage(messages.text(language, "perm_header", mapOf("subject" to subject.name)))
+        permissions.forEach { sender.sendMessage(messages.text(language, "perm_entry", mapOf("permission" to it))) }
     }
 
     private fun resolveSubject(name: String): PermissionSubject {
@@ -120,7 +136,7 @@ class PermissionCommand(
         }
     }
 
-    private fun sendUsage(sender: CommandSender) {
-        sender.sendMessage("Usage: $usage")
+    private fun sendUsage(sender: CommandSender, language: String?) {
+        sender.sendMessage(messages.text(language, "perm_usage", mapOf("usage" to usage)))
     }
 }

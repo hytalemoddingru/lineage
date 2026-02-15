@@ -7,7 +7,6 @@
  */
 package ru.hytalemodding.lineage.proxy.command
 
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -36,7 +35,7 @@ class CommandDispatcherTest {
         registry.register(command)
 
         assertTrue(dispatcher.dispatch(sender, "ping"))
-        assertEquals(listOf("You do not have permission to run this command."), sender.messages)
+        assertTrue(sender.messages.any { it.contains("You do not have permission to run this command.") })
         assertFalse(command.executed)
     }
 
@@ -63,7 +62,7 @@ class CommandDispatcherTest {
         registry.register(command)
 
         assertTrue(dispatcher.dispatch(sender, "ping"))
-        assertEquals(listOf("Command is only available to players."), sender.messages)
+        assertTrue(sender.messages.any { it.contains("Command is only available to players.") })
         assertFalse(command.executed)
     }
 

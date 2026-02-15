@@ -41,6 +41,8 @@ class MessagingServer(
         logger.info("Messaging UDP server listening on {}", bindAddress)
     }
 
+    fun isRunning(): Boolean = running.get()
+
     fun send(address: SocketAddress, channelId: String, payload: ByteArray) {
         val data = MessagingProtocol.encodeMessage(secret, channelId, payload)
         val packet = DatagramPacket(data, data.size, address)

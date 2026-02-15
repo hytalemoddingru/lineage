@@ -35,7 +35,6 @@ dependencies {
     dokka(project(":shared"))
     dokka(project(":proxy"))
     dokka(project(":backend-mod"))
-    dokka(project(":agent"))
 }
 
 dokka {

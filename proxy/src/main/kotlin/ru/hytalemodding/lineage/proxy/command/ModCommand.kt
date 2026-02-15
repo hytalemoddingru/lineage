@@ -11,6 +11,8 @@ import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
 import ru.hytalemodding.lineage.api.command.CommandFlag
 import ru.hytalemodding.lineage.api.command.CommandSender
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessages
+import ru.hytalemodding.lineage.proxy.i18n.ProxyMessagesLoader
 import ru.hytalemodding.lineage.proxy.mod.ModLoadException
 import ru.hytalemodding.lineage.proxy.mod.ModManager
 
@@ -19,6 +21,7 @@ import ru.hytalemodding.lineage.proxy.mod.ModManager
  */
 class ModCommand(
     private val modManager: ModManager,
+    private val messages: ProxyMessages = ProxyMessagesLoader.defaults(),
 ) : Command {
     override val name: String = "mod"
     override val aliases: List<String> = listOf("mods")
@@ -29,15 +32,16 @@ class ModCommand(
 
     override fun execute(context: CommandContext) {
         val sender = context.sender
+        val language = (sender as? ProxyPlayerCommandSender)?.language
         val args = context.args
         if (args.isEmpty()) {
-            sendUsage(sender)
+            sendUsage(sender, language)
             return
         }
         when (args[0].lowercase()) {
-            "list" -> sendList(sender)
-            "reload" -> reload(sender, args.getOrNull(1))
-            else -> sendUsage(sender)
+            "list" -> sendList(sender, language)
+            "reload" -> reload(sender, language, args.getOrNull(1))
+            else -> sendUsage(sender, language)
         }
     }
 
@@ -58,39 +62,45 @@ class ModCommand(
         return emptyList()
     }
 
-    private fun sendList(sender: CommandSender) {
+    private fun sendList(sender: CommandSender, language: String?) {
         val mods = modManager.all()
         if (mods.isEmpty()) {
-            sender.sendMessage("No mods loaded.")
+            sender.sendMessage(messages.text(language, "mod_no_mods"))
             return
         }
-        sender.sendMessage("Loaded mods: ${mods.size}")
+        sender.sendMessage(messages.text(language, "mod_loaded_header", mapOf("count" to mods.size.toString())))
         for (mod in mods) {
-            sender.sendMessage(
-                "- ${mod.info.id} ${mod.info.version} (${mod.state.name.lowercase()})",
-            )
+            sender.sendMessage(messages.text(
+                language,
+                "mod_loaded_entry",
+                mapOf(
+                    "id" to mod.info.id,
+                    "version" to mod.info.version,
+                    "state" to mod.state.name.lowercase(),
+                ),
+            ))
         }
     }
 
-    private fun reload(sender: CommandSender, target: String?) {
+    private fun reload(sender: CommandSender, language: String?, target: String?) {
         if (target == null) {
-            sender.sendMessage("Usage: mod reload <id|all>")
+            sender.sendMessage(messages.text(language, "mod_reload_usage"))
             return
         }
         try {
             if (target.equals("all", ignoreCase = true)) {
                 modManager.reloadAll()
-                sender.sendMessage("Reloaded all mods.")
+                sender.sendMessage(messages.text(language, "mod_reloaded_all"))
             } else {
                 modManager.reload(target)
-                sender.sendMessage("Reloaded mod $target.")
+                sender.sendMessage(messages.text(language, "mod_reloaded_one", mapOf("id" to target)))
             }
         } catch (ex: ModLoadException) {
-            sender.sendMessage(ex.message ?: "Failed to reload mod.")
+            sender.sendMessage(ex.message ?: messages.text(language, "mod_reload_failed"))
         }
     }
 
-    private fun sendUsage(sender: CommandSender) {
-        sender.sendMessage("Usage: $usage")
+    private fun sendUsage(sender: CommandSender, language: String?) {
+        sender.sendMessage(messages.text(language, "mod_usage", mapOf("usage" to usage)))
     }
 }

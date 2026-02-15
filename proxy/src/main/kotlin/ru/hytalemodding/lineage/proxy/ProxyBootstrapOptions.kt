@@ -1,0 +1,40 @@
+/*
+ * Lineage Proxy
+ * Copyright (c) 2026 Hytale Modding Russia
+ *
+ * Licensed under the GNU Affero General Public License v3.0
+ * https://www.gnu.org/licenses/agpl-3.0.html
+ */
+package ru.hytalemodding.lineage.proxy
+
+import java.nio.file.Path
+
+data class ProxyBootstrapOptions(
+    val configPath: Path,
+    val strictMode: Boolean,
+)
+
+object ProxyBootstrapOptionsParser {
+    fun parse(args: Array<String>): ProxyBootstrapOptions {
+        var strictMode = false
+        var configPathArg: String? = null
+        for (arg in args) {
+            if (arg == "--strict") {
+                strictMode = true
+                continue
+            }
+            if (arg.startsWith("--")) {
+                throw IllegalArgumentException("Unknown option: $arg")
+            }
+            if (configPathArg != null) {
+                throw IllegalArgumentException("Only one config path argument is allowed")
+            }
+            configPathArg = arg
+        }
+        return ProxyBootstrapOptions(
+            configPath = Path.of(configPathArg ?: "config.toml"),
+            strictMode = strictMode,
+        )
+    }
+}
+

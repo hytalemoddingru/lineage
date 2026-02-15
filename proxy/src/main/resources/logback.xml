@@ -1,18 +1,18 @@
 <configuration>
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
-        </encoder>
+    <property name="ROOT_LEVEL" value="${lineage.log.level:-INFO}" />
+
+    <appender name="CONSOLE" class="ru.hytalemodding.lineage.proxy.logging.InteractiveConsoleAppender">
+        <pattern>%d{HH:mm:ss.SSS} %-5level [%logger{0}] %msg%n</pattern>
     </appender>
 
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>logs/latest.log</file>
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%logger{0}] %msg%n</pattern>
         </encoder>
     </appender>
 
-    <root level="INFO">
+    <root level="${ROOT_LEVEL}">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE" />
     </root>

@@ -11,4 +11,5 @@ enum class ControlMessageType {
     TRANSFER_REQUEST,
     TRANSFER_RESULT,
     TOKEN_VALIDATION,
+    BACKEND_STATUS,
 }

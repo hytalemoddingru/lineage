@@ -21,6 +21,7 @@ object ControlProtocol {
     private const val TYPE_TRANSFER_REQUEST: Byte = 1
     private const val TYPE_TRANSFER_RESULT: Byte = 2
     private const val TYPE_TOKEN_VALIDATION: Byte = 3
+    private const val TYPE_BACKEND_STATUS: Byte = 4
 
     fun encode(envelope: ControlEnvelope): ByteArray {
         require(envelope.version == VERSION) { "Unsupported control protocol version: ${envelope.version}" }
@@ -61,7 +62,7 @@ object ControlProtocol {
         }
         val type = decodeType(buffer.get()) ?: return null
         val senderIdLen = buffer.get().toInt() and 0xFF
-        if (senderIdLen <= 0 || senderIdLen > MAX_SENDER_ID_LENGTH) {
+        if (senderIdLen !in 1..MAX_SENDER_ID_LENGTH) {
             return null
         }
         if (buffer.remaining() < senderIdLen + 8 + 8 + NONCE_SIZE + 4) {
@@ -108,6 +109,7 @@ object ControlProtocol {
             ControlMessageType.TRANSFER_REQUEST -> TYPE_TRANSFER_REQUEST
             ControlMessageType.TRANSFER_RESULT -> TYPE_TRANSFER_RESULT
             ControlMessageType.TOKEN_VALIDATION -> TYPE_TOKEN_VALIDATION
+            ControlMessageType.BACKEND_STATUS -> TYPE_BACKEND_STATUS
         }
     }
 
@@ -116,6 +118,7 @@ object ControlProtocol {
             TYPE_TRANSFER_REQUEST -> ControlMessageType.TRANSFER_REQUEST
             TYPE_TRANSFER_RESULT -> ControlMessageType.TRANSFER_RESULT
             TYPE_TOKEN_VALIDATION -> ControlMessageType.TOKEN_VALIDATION
+            TYPE_BACKEND_STATUS -> ControlMessageType.BACKEND_STATUS
             else -> null
         }
     }

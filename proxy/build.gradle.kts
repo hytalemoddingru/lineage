@@ -26,10 +26,11 @@ dependencies {
     runtimeOnly("io.netty.incubator:netty-incubator-codec-native-quic:0.0.74.Final:linux-x86_64")
     implementation(libs.tomlj)
     implementation(libs.slf4j.api)
+    implementation(libs.jline)
     implementation(libs.bc.prov)
     implementation(libs.bc.pkix)
     implementation(libs.asm)
-    runtimeOnly(libs.logback.classic)
+    implementation(libs.logback.classic)
 
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
@@ -44,7 +45,22 @@ application {
 }
 
 tasks {
+    val proxyVersion = version.toString()
+
+    processResources {
+        inputs.property("projectVersion", proxyVersion)
+        filesMatching("lineage-version.properties") {
+            expand(mapOf("projectVersion" to proxyVersion))
+        }
+    }
+
     shadowJar {
         mergeServiceFiles()
+        manifest {
+            attributes(
+                "Implementation-Title" to "lineage-proxy",
+                "Implementation-Version" to proxyVersion,
+            )
+        }
     }
 }

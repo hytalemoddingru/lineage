@@ -8,7 +8,10 @@
 package ru.hytalemodding.lineage.shared.command
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class ProxyCommandRegistryProtocolTest {
@@ -37,7 +40,10 @@ class ProxyCommandRegistryProtocolTest {
         val payload = ProxyCommandRegistryProtocol.encodeSnapshot(commands)
         val decoded = ProxyCommandRegistryProtocol.decodeSnapshot(payload)
 
+        assertNotNull(decoded)
         assertEquals(commands, decoded?.commands)
+        assertEquals("proxy", decoded?.senderId)
+        assertEquals(ProxyCommandRegistryProtocol.DEFAULT_TTL_MILLIS, decoded?.ttlMillis)
     }
 
     @Test
@@ -45,5 +51,42 @@ class ProxyCommandRegistryProtocolTest {
         val payload = byteArrayOf(2)
         val decoded = ProxyCommandRegistryProtocol.decodeSnapshot(payload)
         assertNull(decoded)
+    }
+
+    @Test
+    fun requestRoundTrip() {
+        val payload = ProxyCommandRegistryProtocol.encodeRequest()
+        val decoded = ProxyCommandRegistryProtocol.decodeRequest(payload)
+
+        assertNotNull(decoded)
+        assertEquals("backend", decoded?.senderId)
+        assertEquals(ProxyCommandRegistryProtocol.DEFAULT_TTL_MILLIS, decoded?.ttlMillis)
+        assertTrue(ProxyCommandRegistryProtocol.hasSupportedVersion(payload))
+        assertEquals(ProxyCommandRegistryProtocol.VERSION.toInt(), ProxyCommandRegistryProtocol.peekVersion(payload))
+    }
+
+    @Test
+    fun rejectsOversizedRequestPayload() {
+        val oversized = ByteArray(ProxyCommandRegistryProtocol.MAX_PACKET_BYTES + 1) { 1 }
+        assertNull(ProxyCommandRegistryProtocol.decodeRequest(oversized))
+        assertNull(ProxyCommandRegistryProtocol.decodeSnapshot(oversized))
+    }
+
+    @Test
+    fun rejectsTooManyCommandsOnEncode() {
+        val commands = List(1025) { index ->
+            ProxyCommandDescriptor(
+                namespace = "lineage",
+                name = "cmd$index",
+                aliases = emptyList(),
+                description = "d",
+                usage = "u",
+                permission = null,
+                flags = 0,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ProxyCommandRegistryProtocol.encodeSnapshot(commands)
+        }
     }
 }

@@ -7,17 +7,20 @@
  */
 package ru.hytalemodding.lineage.backend.security
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.core.read.ListAppender
 import ru.hytalemodding.lineage.shared.crypto.Hmac
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
 import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
-import ru.hytalemodding.lineage.shared.token.LEGACY_PROXY_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.TokenValidationError
 import ru.hytalemodding.lineage.shared.token.TokenValidationException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import java.util.Base64
 
 class TokenValidatorTest {
@@ -33,6 +36,8 @@ class TokenValidatorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
@@ -52,6 +57,8 @@ class TokenValidatorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, "other-secret".toByteArray())
@@ -72,6 +79,8 @@ class TokenValidatorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
@@ -92,6 +101,8 @@ class TokenValidatorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
@@ -118,6 +129,27 @@ class TokenValidatorTest {
     }
 
     @Test
+    fun rejectsLegacyV2TokenVersion() {
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val token = ProxyToken(
+            version = 2,
+            playerId = "player-1",
+            targetServerId = "hub",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            nonceB64 = "nonce",
+        )
+        val encoded = ProxyTokenCodec.encode(token, secret)
+
+        val ex = assertThrows(TokenValidationException::class.java) {
+            validator.validate(encoded, "hub")
+        }
+        assertEquals(TokenValidationError.UNSUPPORTED_VERSION, ex.error)
+    }
+
+    @Test
     fun rejectsMalformedToken() {
         val clock = FixedClock(1_500L)
         val validator = TokenValidator(secret, clock)
@@ -129,22 +161,88 @@ class TokenValidatorTest {
     }
 
     @Test
+    fun malformedTokenLogDoesNotContainRawTokenData() {
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val marker = "SENSITIVE_TOKEN_MARKER_123"
+        val logger = LoggerFactory.getLogger(TokenValidator::class.java) as Logger
+        val appender = ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            assertThrows(TokenValidationException::class.java) {
+                validator.validate(marker, "hub")
+            }
+        } finally {
+            logger.detachAppender(appender)
+        }
+        assertTrue(appender.list.none { it.formattedMessage.contains(marker) })
+    }
+
+    @Test
     fun acceptsPreviousSecretDuringRotation() {
         val clock = FixedClock(1_500L)
         val previous = "old-secret".toByteArray()
         val validator = TokenValidator(listOf(secret, previous), clock)
         val token = ProxyToken(
-            version = LEGACY_PROXY_TOKEN_VERSION,
+            version = CURRENT_PROXY_TOKEN_VERSION,
             playerId = "player-1",
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
+            nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, previous)
 
         val parsed = validator.validate(encoded, "hub")
 
         assertEquals("player-1", parsed.token.playerId)
+    }
+
+    @Test
+    fun rejectsMissingClientCertificate() {
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val token = ProxyToken(
+            version = CURRENT_PROXY_TOKEN_VERSION,
+            playerId = "player-1",
+            targetServerId = "hub",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            clientCertB64 = null,
+            proxyCertB64 = "proxy-cert",
+            nonceB64 = "nonce",
+        )
+        val encoded = ProxyTokenCodec.encode(token, secret)
+
+        val ex = assertThrows(TokenValidationException::class.java) {
+            validator.validate(encoded, "hub")
+        }
+        assertEquals(TokenValidationError.MALFORMED, ex.error)
+    }
+
+    @Test
+    fun rejectsMissingProxyCertificate() {
+        val clock = FixedClock(1_500L)
+        val validator = TokenValidator(secret, clock)
+        val token = ProxyToken(
+            version = CURRENT_PROXY_TOKEN_VERSION,
+            playerId = "player-1",
+            targetServerId = "hub",
+            issuedAtMillis = 1_000L,
+            expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = null,
+            nonceB64 = "nonce",
+        )
+        val encoded = ProxyTokenCodec.encode(token, secret)
+
+        val ex = assertThrows(TokenValidationException::class.java) {
+            validator.validate(encoded, "hub")
+        }
+        assertEquals(TokenValidationError.MALFORMED, ex.error)
     }
 
     private class FixedClock(private val now: Long) : Clock {

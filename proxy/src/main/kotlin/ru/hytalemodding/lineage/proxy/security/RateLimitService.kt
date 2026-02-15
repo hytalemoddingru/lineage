@@ -10,8 +10,10 @@ package ru.hytalemodding.lineage.proxy.security
 import ru.hytalemodding.lineage.proxy.config.RateLimitConfig
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.time.SystemClock
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * In-memory fixed-window rate limiting for basic abuse protection.
@@ -20,10 +22,48 @@ class RateLimitService(
     config: RateLimitConfig,
     clock: Clock = SystemClock,
 ) {
+    val handshakeInFlight = InFlightLimiter(config.handshakeConcurrentMax)
+    val routingInFlight = InFlightLimiter(config.routingConcurrentMax)
     val connectionPerIp = FixedWindowRateLimiter<String>(config.connectionPerIp, clock)
     val handshakePerIp = FixedWindowRateLimiter<String>(config.handshakePerIp, clock)
     val streamsPerSession = FixedWindowRateLimiter<String>(config.streamsPerSession, clock)
     val invalidPacketsPerSession = FixedWindowRateLimiter<String>(config.invalidPacketsPerSession, clock)
+}
+
+class InFlightLimiter(private val maxInFlight: Int) {
+    private val inFlight = AtomicInteger(0)
+
+    init {
+        require(maxInFlight > 0) { "maxInFlight must be > 0" }
+    }
+
+    fun tryAcquire(): Lease? {
+        while (true) {
+            val current = inFlight.get()
+            if (current >= maxInFlight) {
+                return null
+            }
+            if (inFlight.compareAndSet(current, current + 1)) {
+                return Lease(this)
+            }
+        }
+    }
+
+    fun current(): Int = inFlight.get()
+
+    private fun release() {
+        inFlight.decrementAndGet()
+    }
+
+    class Lease internal constructor(private val owner: InFlightLimiter) : AutoCloseable {
+        private val released = AtomicBoolean(false)
+
+        override fun close() {
+            if (released.compareAndSet(false, true)) {
+                owner.release()
+            }
+        }
+    }
 }
 
 class FixedWindowRateLimiter<K>(

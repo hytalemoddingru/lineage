@@ -40,6 +40,7 @@ class ProxySmokeTest {
             id = "hub"
             host = "127.0.0.1"
             port = 30000
+            cert_fingerprint_sha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
             [routing]
             default_backend_id = "hub"
@@ -70,7 +71,12 @@ class ProxySmokeTest {
             clock = FixedClock(1_000L),
         )
 
-        val token = tokenService.issueToken("player-1", backend.id)
+        val token = tokenService.issueToken(
+            playerId = "player-1",
+            targetServerId = backend.id,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
+        )
 
         assertEquals("hub", backend.id)
         assertTrue(token.isNotBlank())

@@ -40,6 +40,8 @@ class TokenService(
         clientCertB64: String? = null,
         proxyCertB64: String? = null,
     ): String {
+        require(!clientCertB64.isNullOrBlank()) { "clientCertB64 must not be blank" }
+        require(!proxyCertB64.isNullOrBlank()) { "proxyCertB64 must not be blank" }
         val now = clock.nowMillis()
         val nonceB64 = generateNonce()
         val token = ProxyToken(

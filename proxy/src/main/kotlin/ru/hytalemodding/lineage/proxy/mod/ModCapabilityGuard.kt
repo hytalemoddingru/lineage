@@ -233,21 +233,43 @@ class GuardedServiceRegistry(
 ) : ServiceRegistry {
     override fun <T : Any> register(key: ServiceKey<T>, service: T) {
         guard.require(ModCapability.SERVICES)
+        ensurePublicServiceKey(key)
         delegate.register(key, service)
     }
 
     override fun <T : Any> get(key: ServiceKey<T>): T? {
         guard.require(ModCapability.SERVICES)
+        ensurePublicServiceKey(key)
         return delegate.get(key)
     }
 
     override fun <T : Any> unregister(key: ServiceKey<T>) {
         guard.require(ModCapability.SERVICES)
+        ensurePublicServiceKey(key)
         delegate.unregister(key)
     }
 
     override fun keys(): Set<ServiceKey<*>> {
         guard.require(ModCapability.SERVICES)
         return delegate.keys()
+    }
+
+    private fun ensurePublicServiceKey(key: ServiceKey<*>) {
+        val typeName = key.type.name
+        if (RESERVED_SERVICE_TYPE_PREFIXES.any { typeName.startsWith(it) }) {
+            throw IllegalArgumentException("Service key is reserved: $typeName")
+        }
+        if (key.name.startsWith(RESERVED_SERVICE_NAME_PREFIX)) {
+            throw IllegalArgumentException("Service key name is reserved: ${key.name}")
+        }
+    }
+
+    private companion object {
+        val RESERVED_SERVICE_TYPE_PREFIXES = listOf(
+            "ru.hytalemodding.lineage.proxy.security.",
+            "ru.hytalemodding.lineage.backend.security.",
+            "ru.hytalemodding.lineage.shared.security.",
+        )
+        const val RESERVED_SERVICE_NAME_PREFIX = "lineage.internal."
     }
 }

@@ -30,9 +30,9 @@ const val CURRENT_BACKEND_CONFIG_SCHEMA_VERSION = 1
  * @property controlReplayMaxEntries Max replay entries kept in memory.
  * @property controlMaxSkewMillis Allowed clock skew for control-plane messages.
  * @property controlTtlMillis TTL for control-plane envelopes.
+ * @property controlMaxInflight Max concurrently processed inbound control-plane envelopes.
+ * @property controlExpectedSenderId Expected sender identifier for inbound control-plane envelopes.
  * @property requireAuthenticatedMode Whether auth-mode must be AUTHENTICATED.
- * @property agentless Whether backend operates in agentless mode (proxy-token only).
- * @property javaAgentFallback Whether JavaAgent fallback is enabled.
  * @property enforceProxy Whether invalid or missing proxy tokens should reject login.
  * @property referralSourceHost Expected referral source host for proxy connections.
  * @property referralSourcePort Expected referral source port for proxy connections.
@@ -55,9 +55,9 @@ data class BackendConfig(
     val controlReplayMaxEntries: Int,
     val controlMaxSkewMillis: Long,
     val controlTtlMillis: Long,
+    val controlMaxInflight: Int = 256,
+    val controlExpectedSenderId: String = "proxy",
     val requireAuthenticatedMode: Boolean,
-    val agentless: Boolean,
-    val javaAgentFallback: Boolean,
     val enforceProxy: Boolean,
     val referralSourceHost: String,
     val referralSourcePort: Int,

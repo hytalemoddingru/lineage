@@ -23,6 +23,9 @@ const val CURRENT_CONFIG_SCHEMA_VERSION = 1
  * @property backends List of available backend servers.
  * @property routing Routing defaults and rules.
  * @property messaging UDP messaging configuration for backend communication.
+ * @property observability HTTP endpoints for runtime health/metrics.
+ * @property logging Runtime logging options.
+ * @property console Interactive console options.
  * @property referral Referral source configuration injected into Connect packets.
  * @property limits Protocol limit overrides for client sanity checks.
  * @property rateLimits Basic abuse protection thresholds.
@@ -34,6 +37,9 @@ data class ProxyConfig(
     val backends: List<BackendConfig>,
     val routing: RoutingConfig,
     val messaging: MessagingConfig,
+    val observability: ObservabilityConfig = ObservabilityConfig(),
+    val logging: LoggingConfig = LoggingConfig(),
+    val console: ConsoleConfig = ConsoleConfig(),
     val referral: ReferralConfig,
     val limits: ProtocolLimitsConfig,
     val rateLimits: RateLimitConfig,
@@ -67,12 +73,32 @@ data class SecurityConfig(
  * @property id Stable backend identifier referenced by routing rules.
  * @property host Backend host or IP address.
  * @property port Backend port.
+ * @property certFingerprintSha256 Backend TLS certificate SHA-256 fingerprint in base64url.
+ * Required in strict mode, optional in TOFU mode.
+ * @property certTrustMode Certificate trust mode for proxy->backend QUIC.
  */
 data class BackendConfig(
     val id: String,
     val host: String,
     val port: Int,
+    val certFingerprintSha256: String? = null,
+    val certTrustMode: BackendCertTrustMode = BackendCertTrustMode.TOFU,
 )
+
+/**
+ * Backend certificate trust behavior.
+ */
+enum class BackendCertTrustMode {
+    /**
+     * Require exact SHA-256 pin match from config.
+     */
+    STRICT_PINNED,
+
+    /**
+     * Trust first seen certificate and accept rotations with warning.
+     */
+    TOFU,
+}
 
 /**
  * Routing defaults for selecting backend servers.
@@ -95,6 +121,7 @@ data class RoutingConfig(
  * @property controlReplayMaxEntries Max replay entries kept in memory.
  * @property controlMaxSkewMillis Allowed clock skew for control-plane messages.
  * @property controlTtlMillis TTL for control-plane envelopes.
+ * @property controlMaxInflight Max concurrently processed inbound control-plane envelopes.
  */
 data class MessagingConfig(
     val host: String,
@@ -106,6 +133,31 @@ data class MessagingConfig(
     val controlReplayMaxEntries: Int,
     val controlMaxSkewMillis: Long,
     val controlTtlMillis: Long,
+    val controlMaxInflight: Int = 256,
+)
+
+/**
+ * HTTP observability endpoint configuration.
+ */
+data class ObservabilityConfig(
+    val enabled: Boolean = false,
+    val host: String = "127.0.0.1",
+    val port: Int = 9100,
+)
+
+/**
+ * Logging configuration.
+ */
+data class LoggingConfig(
+    val debug: Boolean = false,
+    val maxArchiveFiles: Int = 10,
+)
+
+/**
+ * Interactive console configuration.
+ */
+data class ConsoleConfig(
+    val historyLimit: Int = 50,
 )
 
 /**
@@ -120,6 +172,8 @@ data class ReferralConfig(
  * Rate limiting configuration for basic abuse protection.
  */
 data class RateLimitConfig(
+    val handshakeConcurrentMax: Int,
+    val routingConcurrentMax: Int,
     val connectionPerIp: RateLimitWindow,
     val handshakePerIp: RateLimitWindow,
     val streamsPerSession: RateLimitWindow,

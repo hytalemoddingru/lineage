@@ -34,6 +34,16 @@ class CommandRegistryImplTest {
         assertNotNull(registry.get("examplemod:hub"))
     }
 
+    @Test
+    fun supportsQuestionAndUnicodeAliases() {
+        val registry = CommandRegistryImpl()
+        val command = SimpleCommand("help", listOf("?", "помощь"))
+        registry.register(command, "lineage")
+
+        assertNotNull(registry.get("?"))
+        assertNotNull(registry.get("помощь"))
+    }
+
     private class SimpleCommand(
         override val name: String,
         override val aliases: List<String>,

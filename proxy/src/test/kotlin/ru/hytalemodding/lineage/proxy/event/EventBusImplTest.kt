@@ -45,6 +45,20 @@ class EventBusImplTest {
         assertEquals(listOf("cancel", "monitor"), order)
     }
 
+    @Test
+    fun isolatesHandlerFailureAndContinuesDispatch() {
+        val bus = EventBusImpl()
+        val order = mutableListOf<String>()
+        val broken = BrokenListener(order)
+        val high = HighListener(order)
+
+        bus.register(broken)
+        bus.register(high)
+        bus.post(SimpleEvent())
+
+        assertEquals(listOf("broken", "high"), order)
+    }
+
     private class SimpleEvent : Event
 
     private class CancellableEvent : Event, Cancellable {
@@ -66,6 +80,16 @@ class EventBusImplTest {
         @EventHandler(priority = EventPriority.HIGH)
         fun onEvent(event: SimpleEvent) {
             order.add("high")
+        }
+    }
+
+    private class BrokenListener(
+        private val order: MutableList<String>,
+    ) {
+        @EventHandler(priority = EventPriority.NORMAL)
+        fun onEvent(event: SimpleEvent) {
+            order.add("broken")
+            error("listener failure")
         }
     }
 

@@ -9,6 +9,7 @@ package ru.hytalemodding.lineage.proxy.command
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import ru.hytalemodding.lineage.api.command.Command
 import ru.hytalemodding.lineage.api.command.CommandContext
@@ -17,6 +18,7 @@ import ru.hytalemodding.lineage.api.messaging.Channel
 import ru.hytalemodding.lineage.api.messaging.Message
 import ru.hytalemodding.lineage.api.messaging.MessageHandler
 import ru.hytalemodding.lineage.api.messaging.Messaging
+import ru.hytalemodding.lineage.api.player.PlayerState
 import ru.hytalemodding.lineage.proxy.permission.PermissionCheckerImpl
 import ru.hytalemodding.lineage.proxy.player.PlayerManagerImpl
 import ru.hytalemodding.lineage.shared.command.PlayerCommandProtocol
@@ -30,11 +32,11 @@ class PlayerCommandGatewayTest {
         val dispatcher = CommandDispatcher(registry, PermissionCheckerImpl())
         val players = PlayerManagerImpl()
         val playerId = UUID.randomUUID()
-        players.getOrCreate(playerId, "tester")
+        players.getOrCreate(playerId, "tester").state = PlayerState.AUTHENTICATED
 
         registry.register(SimpleCommand("ping", "pong"))
 
-        PlayerCommandGateway(messaging, dispatcher, players)
+        val gateway = PlayerCommandGateway(messaging, dispatcher, players)
 
         val payload = PlayerCommandProtocol.encodeRequest(playerId, "ping")
         messaging.receive(PlayerCommandProtocol.REQUEST_CHANNEL_ID, payload)
@@ -45,17 +47,88 @@ class PlayerCommandGatewayTest {
         assertNotNull(decoded)
         decoded!!
         assertEquals(playerId, decoded.playerId)
-        assertEquals("pong", decoded.message)
+        assertTrue(decoded.message.contains("pong"))
+        assertTrue(decoded.message.contains("\u00A7"))
+        assertTrue(gateway.rejectCountersSnapshot().isEmpty())
+    }
+
+    @Test
+    fun rejectsRequestWithUnsupportedVersion() {
+        val messaging = TestMessaging()
+        val registry = CommandRegistryImpl()
+        val dispatcher = CommandDispatcher(registry, PermissionCheckerImpl())
+        val players = PlayerManagerImpl()
+        val playerId = UUID.randomUUID()
+        players.getOrCreate(playerId, "tester").state = PlayerState.AUTHENTICATED
+        registry.register(SimpleCommand("ping", "pong"))
+
+        val gateway = PlayerCommandGateway(messaging, dispatcher, players)
+
+        val payload = "v1\n$playerId\n1000\n10000\nAAAAAAAAAAAAAAAAAAAAAA\nping".toByteArray()
+        messaging.receive(PlayerCommandProtocol.REQUEST_CHANNEL_ID, payload)
+
+        val responses = messaging.sentPayloads(PlayerCommandProtocol.RESPONSE_CHANNEL_ID)
+        assertTrue(responses.isEmpty())
+        assertEquals(1L, gateway.rejectCountersSnapshot()["VERSION_MISMATCH"])
+    }
+
+    @Test
+    fun enforcesPermissionForBackendForwardedCommand() {
+        val messaging = TestMessaging()
+        val registry = CommandRegistryImpl()
+        val dispatcher = CommandDispatcher(registry, PermissionCheckerImpl())
+        val players = PlayerManagerImpl()
+        val playerId = UUID.randomUUID()
+        players.getOrCreate(playerId, "tester").state = PlayerState.AUTHENTICATED
+
+        registry.register(SimpleCommand("secure", "ok", "lineage.command.secure"))
+
+        val gateway = PlayerCommandGateway(messaging, dispatcher, players)
+
+        val payload = PlayerCommandProtocol.encodeRequest(playerId, "secure")
+        messaging.receive(PlayerCommandProtocol.REQUEST_CHANNEL_ID, payload)
+
+        val responses = messaging.sentPayloads(PlayerCommandProtocol.RESPONSE_CHANNEL_ID)
+        val decoded = PlayerCommandProtocol.decodeResponse(responses.first())
+
+        assertNotNull(decoded)
+        decoded!!
+        assertTrue(decoded.message.contains("You do not have permission to run this command."))
+        assertTrue(gateway.rejectCountersSnapshot().isEmpty())
+    }
+
+    @Test
+    fun rejectsCommandWhenPlayerNotAuthenticated() {
+        val messaging = TestMessaging()
+        val registry = CommandRegistryImpl()
+        val dispatcher = CommandDispatcher(registry, PermissionCheckerImpl())
+        val players = PlayerManagerImpl()
+        val playerId = UUID.randomUUID()
+        players.getOrCreate(playerId, "tester").state = PlayerState.HANDSHAKING
+        registry.register(SimpleCommand("ping", "pong"))
+
+        val gateway = PlayerCommandGateway(messaging, dispatcher, players)
+
+        val payload = PlayerCommandProtocol.encodeRequest(playerId, "ping")
+        messaging.receive(PlayerCommandProtocol.REQUEST_CHANNEL_ID, payload)
+
+        val responses = messaging.sentPayloads(PlayerCommandProtocol.RESPONSE_CHANNEL_ID)
+        val decoded = PlayerCommandProtocol.decodeResponse(responses.first())
+
+        assertNotNull(decoded)
+        decoded!!
+        assertTrue(decoded.message.contains("Player is not authenticated."))
+        assertTrue(gateway.rejectCountersSnapshot().isEmpty())
     }
 
     private class SimpleCommand(
         override val name: String,
         private val response: String,
+        override val permission: String? = null,
     ) : Command {
         override val aliases: List<String> = emptyList()
         override val description: String = "test"
         override val usage: String = "ping"
-        override val permission: String? = null
         override val flags: Set<CommandFlag> = emptySet()
 
         override fun execute(context: CommandContext) {

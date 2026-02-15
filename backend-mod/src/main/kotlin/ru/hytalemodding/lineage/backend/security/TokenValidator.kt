@@ -10,7 +10,6 @@ package ru.hytalemodding.lineage.backend.security
 import ru.hytalemodding.lineage.shared.time.Clock
 import ru.hytalemodding.lineage.shared.time.SystemClock
 import ru.hytalemodding.lineage.shared.token.CURRENT_PROXY_TOKEN_VERSION
-import ru.hytalemodding.lineage.shared.token.LEGACY_PROXY_TOKEN_VERSION
 import ru.hytalemodding.lineage.shared.token.ProxyToken
 import ru.hytalemodding.lineage.shared.token.ParsedProxyToken
 import ru.hytalemodding.lineage.shared.token.ProxyTokenCodec
@@ -49,13 +48,11 @@ class TokenValidator(
         } catch (ex: ProxyTokenFormatException) {
             val parts = encodedToken.split('.')
             val payloadLen = parts.getOrNull(1)?.length ?: -1
-            val preview = encodedToken.take(64)
             logger.warn(
-                "Malformed proxy token (parts={}, payloadLen={}, len={}, preview={})",
+                "Malformed proxy token (parts={}, payloadLen={}, len={})",
                 parts.size,
                 payloadLen,
                 encodedToken.length,
-                preview,
             )
             throw TokenValidationException(TokenValidationError.MALFORMED, ex.message ?: "Malformed token")
         }
@@ -65,11 +62,17 @@ class TokenValidator(
         }
 
         val token = parsed.token
-        if (token.version != CURRENT_PROXY_TOKEN_VERSION && token.version != 2 && token.version != LEGACY_PROXY_TOKEN_VERSION) {
+        if (token.version != CURRENT_PROXY_TOKEN_VERSION) {
             throw TokenValidationException(
                 TokenValidationError.UNSUPPORTED_VERSION,
                 "Unsupported token version: ${token.version}",
             )
+        }
+        if (token.clientCertB64.isNullOrBlank()) {
+            throw TokenValidationException(TokenValidationError.MALFORMED, "Missing client certificate in token")
+        }
+        if (token.proxyCertB64.isNullOrBlank()) {
+            throw TokenValidationException(TokenValidationError.MALFORMED, "Missing proxy certificate in token")
         }
 
         val now = clock.nowMillis()

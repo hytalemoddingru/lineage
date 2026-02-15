@@ -34,6 +34,8 @@ class HandshakeInterceptorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret)
@@ -85,6 +87,8 @@ class HandshakeInterceptorTest {
             targetServerId = "hub",
             issuedAtMillis = 1_000L,
             expiresAtMillis = 2_000L,
+            clientCertB64 = "client-cert",
+            proxyCertB64 = "proxy-cert",
             nonceB64 = "nonce",
         )
         val encoded = ProxyTokenCodec.encode(token, secret).toByteArray()
